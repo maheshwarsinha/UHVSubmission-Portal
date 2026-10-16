@@ -1,0 +1,21 @@
+# LAN / Campus Wi-Fi Specific Compose Configuration
+# Usage: docker compose -f docker-compose.yml -f docker-compose.lan.yml up -d
+
+services:
+  backend:
+    volumes:
+      - ./data/uploads:/data/uploads
+    environment:
+      - ENVIRONMENT=production-lan
+      - SERVER_HOST=0.0.0.0
+
+  worker:
+    volumes:
+      - ./data/uploads:/data/uploads
+    environment:
+      - ENVIRONMENT=production-lan
+
+  nginx:
+    ports:
+      - "80:80"
+      - "8000:8000" # Optional direct API port for monitoring
