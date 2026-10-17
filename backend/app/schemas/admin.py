@@ -50,3 +50,7 @@ class MetricsSummaryResponse(BaseModel):
     disk_free_gb: float
     disk_total_gb: float
     disk_used_percent: float
+    email_sent_today: Optional[int] = 0
+    email_daily_limit: Optional[int] = 300
+    email_remaining_today: Optional[int] = 300
+    email_queued_count: Optional[int] = 0

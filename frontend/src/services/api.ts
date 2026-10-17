@@ -175,6 +175,11 @@ export const apiService = {
     return res.data;
   },
 
+  async dispatchQueuedEmails() {
+    const res = await api.post('/admin/dispatch-queued-emails');
+    return res.data;
+  },
+
   getCsvExportUrl(filters: { section?: string; branch?: string; category?: string; deadline_status?: string; search?: string; sort_by?: string; sort_order?: string } = {}) {
     const params = new URLSearchParams();
     const token = localStorage.getItem('uhv_admin_token');

@@ -149,6 +149,10 @@ export interface AdminMetrics {
   disk_free_gb: number;
   disk_total_gb: number;
   disk_used_percent: number;
+  email_sent_today?: number;
+  email_daily_limit?: number;
+  email_remaining_today?: number;
+  email_queued_count?: number;
 }
 
 export interface SubmissionItem {

@@ -21,7 +21,33 @@ class EmailService:
 
     @classmethod
     def send_smtp_email(cls, recipient: str, subject: str, html_content: str, text_content: str) -> Tuple[bool, str]:
-        # 1. Option A: Resend HTTP API (Port 443 - Recommended for Render Free Tier)
+        # 1. Option A: Brevo HTTP API (Port 443 - 300 emails/day free, sends to ANY recipient)
+        if getattr(settings, "BREVO_API_KEY", None):
+            try:
+                import httpx
+                headers = {
+                    "api-key": settings.BREVO_API_KEY,
+                    "Content-Type": "application/json"
+                }
+                sender_email = settings.EMAIL_FROM or settings.SMTP_USER or "maheshwarsinha01@gmail.com"
+                payload = {
+                    "sender": {"email": sender_email, "name": "UHV Assignment Portal"},
+                    "to": [{"email": recipient}],
+                    "subject": subject,
+                    "htmlContent": html_content,
+                    "textContent": text_content
+                }
+                res = httpx.post("https://api.brevo.com/v3/smtp/email", headers=headers, json=payload, timeout=15.0)
+                if res.status_code in (200, 201):
+                    msg_id = res.json().get("messageId", "BREVO_OK")
+                    logger.info(f"Email successfully delivered to {recipient} via Brevo HTTPS API (ID: {msg_id})")
+                    return True, f"BREVO_{msg_id}"
+                else:
+                    logger.warning(f"Brevo HTTP dispatch failed ({res.status_code}: {res.text}), checking fallbacks...")
+            except Exception as brevo_err:
+                logger.warning(f"Brevo HTTP API error: {brevo_err}, checking fallbacks...")
+
+        # 2. Option B: Resend HTTP API (Port 443 - Delivered to verified domain or teacher email)
         if getattr(settings, "RESEND_API_KEY", None):
             try:
                 import httpx
@@ -29,10 +55,10 @@ class EmailService:
                     "Authorization": f"Bearer {settings.RESEND_API_KEY}",
                     "Content-Type": "application/json"
                 }
-                from_addr = settings.EMAIL_FROM
-                # If using free default domain on resend
-                if not from_addr or "@gmail.com" in from_addr:
-                    from_addr = "UHV Portal <onboarding@resend.dev>"
+                from_addr = "UHV Portal <onboarding@resend.dev>"
+                if settings.EMAIL_FROM and "@gmail.com" not in settings.EMAIL_FROM:
+                    from_addr = f"UHV Portal <{settings.EMAIL_FROM}>"
+
                 payload = {
                     "from": from_addr,
                     "to": [recipient],
@@ -45,51 +71,10 @@ class EmailService:
                     msg_id = res.json().get("id", "RESEND_OK")
                     logger.info(f"Email successfully delivered to {recipient} via Resend HTTPS API (ID: {msg_id})")
                     return True, f"RESEND_{msg_id}"
-                elif res.status_code == 403 and "only send testing emails to your own email address" in res.text:
-                    logger.warning(f"Resend testing mode restriction for {recipient}. Checking fallbacks or backup delivery...")
-                    teacher_email = settings.TEACHER_EMAIL or "maheshwarsinha7@gmail.com"
-                    if recipient != teacher_email:
-                        backup_payload = {
-                            "from": from_addr,
-                            "to": [teacher_email],
-                            "subject": f"[Forward to {recipient}] {subject}",
-                            "html": f"<div style='background:#fef3c7;padding:12px;border:1px solid #fde68a;border-radius:6px;margin-bottom:15px;color:#92400e;font-size:12px;'><b>Notice:</b> This submission receipt was delivered to your teacher inbox because Resend testing mode only delivers to your registered account address until a domain is verified or BREVO_API_KEY is added. Intended student recipient: <b>{recipient}</b></div>" + html_content,
-                            "text": f"Notice: Intended student recipient: {recipient}\n\n" + text_content
-                        }
-                        bk_res = httpx.post("https://api.resend.com/emails", headers=headers, json=backup_payload, timeout=15.0)
-                        if bk_res.status_code in (200, 201):
-                            bk_id = bk_res.json().get("id", "BACKUP_OK")
-                            logger.info(f"Delivered backup receipt to teacher email {teacher_email} for student {recipient}")
-                            return True, f"RESEND_BACKUP_TO_TEACHER_{bk_id}"
                 else:
-                    logger.warning(f"Resend HTTP dispatch failed ({res.status_code}: {res.text}), trying fallbacks...")
+                    logger.warning(f"Resend HTTP dispatch failed ({res.status_code}: {res.text}), checking fallbacks...")
             except Exception as resend_err:
-                logger.warning(f"Resend HTTP API error: {resend_err}, trying fallbacks...")
-
-        # 2. Option B: Brevo HTTP API (Port 443 - 300 emails/day free, zero credit card)
-        if getattr(settings, "BREVO_API_KEY", None):
-            try:
-                import httpx
-                headers = {
-                    "api-key": settings.BREVO_API_KEY,
-                    "Content-Type": "application/json"
-                }
-                payload = {
-                    "sender": {"email": settings.EMAIL_FROM or "maheshwarsinha01@gmail.com", "name": "UHV Assignment Portal"},
-                    "to": [{"email": recipient}],
-                    "subject": subject,
-                    "htmlContent": html_content,
-                    "textContent": text_content
-                }
-                res = httpx.post("https://api.brevo.com/v3/smtp/email", headers=headers, json=payload, timeout=15.0)
-                if res.status_code in (200, 201):
-                    msg_id = res.json().get("messageId", "BREVO_OK")
-                    logger.info(f"Email successfully delivered to {recipient} via Brevo HTTPS API (ID: {msg_id})")
-                    return True, f"BREVO_{msg_id}"
-                else:
-                    logger.warning(f"Brevo HTTP dispatch failed ({res.status_code}: {res.text}), trying fallbacks...")
-            except Exception as brevo_err:
-                logger.warning(f"Brevo HTTP API error: {brevo_err}, trying fallbacks...")
+                logger.warning(f"Resend HTTP API error: {resend_err}, checking fallbacks...")
 
         # 3. Option C: Standard SMTP (Works locally on Windows/Linux with open ports)
         if not settings.SMTP_ENABLED or not settings.SMTP_USER or not settings.SMTP_PASSWORD:

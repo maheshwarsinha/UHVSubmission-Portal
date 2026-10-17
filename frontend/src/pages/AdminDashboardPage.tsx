@@ -635,7 +635,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
       </div>
 
       {/* Overview Metrics Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 my-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3.5 my-6">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
           <span className="text-[11px] font-bold text-slate-400 uppercase block">Total Submissions</span>
           <span className="text-2xl font-black text-slate-900 mt-1 block">{metrics?.total_submissions || 0}</span>
@@ -667,11 +667,55 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-indigo-600 uppercase block">Email Quota</span>
+            {(metrics?.email_queued_count ?? 0) > 0 && (
+              <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[9px] font-bold rounded">Queued</span>
+            )}
+          </div>
+          <span className="text-2xl font-black text-indigo-900 mt-1 block">
+            {metrics?.email_sent_today ?? 0}
+            <span className="text-xs text-slate-400 font-normal"> / {metrics?.email_daily_limit ?? 300}</span>
+          </span>
+          <span className="text-[10px] text-slate-500 mt-1 block">
+            {(metrics?.email_queued_count ?? 0) > 0
+              ? `${metrics?.email_queued_count} queued for tomorrow`
+              : `${metrics?.email_remaining_today ?? 300} remaining today`}
+          </span>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
           <span className="text-[11px] font-bold text-slate-400 uppercase block">Server Disk Free</span>
           <span className="text-2xl font-black text-slate-900 mt-1 block">{metrics?.disk_free_gb || 0} GB</span>
           <span className="text-[10px] text-slate-500 mt-1 block">{metrics?.disk_used_percent || 0}% used</span>
         </div>
       </div>
+
+      {/* Queued Email Notice Banner */}
+      {(metrics?.email_queued_count ?? 0) > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center space-x-2 text-amber-800">
+            <Mail className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>
+              <b>Daily Free Quota Reached:</b> {metrics?.email_queued_count} student receipt(s) are safely queued. They will automatically dispatch tomorrow when the 300-email daily quota resets!
+            </span>
+          </div>
+          <button
+            onClick={async () => {
+              try {
+                const res = await apiService.dispatchQueuedEmails();
+                alert(`Dispatch result: ${res.message || 'Complete'}`);
+                fetchDashboardData();
+              } catch (err: any) {
+                alert(`Dispatch failed: ${err.message}`);
+              }
+            }}
+            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs shrink-0 cursor-pointer"
+          >
+            Dispatch Available Slots Now
+          </button>
+        </div>
+      )}
 
       {/* Section Distribution */}
       {metrics?.section_breakdown && (

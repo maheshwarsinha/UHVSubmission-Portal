@@ -82,6 +82,21 @@ def get_metrics(
     disk_total_gb = round(disk.total / (1024 ** 3), 2)
     disk_used_pct = round(disk.percent, 1)
 
+    # Email quota calculation (300/day limit)
+    now_ist = datetime.now(ist_tz)
+    start_of_today_utc = now_ist.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    sent_today = db.query(NotificationRecord).filter(
+        NotificationRecord.delivery_status == "SENT",
+        NotificationRecord.sent_at >= start_of_today_utc
+    ).count()
+
+    queued_count = db.query(NotificationRecord).filter(
+        NotificationRecord.delivery_status == "QUEUED_DAILY_LIMIT"
+    ).count()
+
+    daily_limit = 300
+    remaining_today = max(0, daily_limit - sent_today)
+
     return MetricsSummaryResponse(
         total_submissions=total,
         completed_submissions=completed,
@@ -95,7 +110,11 @@ def get_metrics(
         daily_breakdown=daily_breakdown,
         disk_free_gb=disk_free_gb,
         disk_total_gb=disk_total_gb,
-        disk_used_percent=disk_used_pct
+        disk_used_percent=disk_used_pct,
+        email_sent_today=sent_today,
+        email_daily_limit=daily_limit,
+        email_remaining_today=remaining_today,
+        email_queued_count=queued_count
     )
 
 @router.get("/submissions")
@@ -683,10 +702,12 @@ def send_test_email(
     current_admin: Administrator = Depends(get_current_admin)
 ):
     """
-    Sends a test email to verify transactional email delivery via Resend/Brevo/SMTP.
+    Sends a test email to verify transactional email delivery via Brevo/Resend/SMTP.
     """
     from app.services.email_service import email_service
-    recipient = target_email or settings.TEACHER_EMAIL or settings.EMAIL_FROM
+    teacher_setting = db.query(SystemSetting).filter(SystemSetting.key == "teacher_email").first()
+    dyn_teacher = teacher_setting.value if teacher_setting and teacher_setting.value else None
+    recipient = target_email or dyn_teacher or settings.TEACHER_EMAIL or settings.EMAIL_FROM
     if not recipient:
         raise HTTPException(status_code=400, detail="No recipient email address configured.")
 
@@ -730,6 +751,18 @@ def resend_submission_emails(
     """
     from app.tasks.email_tasks import execute_email_dispatch
     res = execute_email_dispatch(submission_id)
+    return res
+
+@router.post("/dispatch-queued-emails")
+def trigger_dispatch_queued_emails(
+    db: Session = Depends(get_db),
+    current_admin: Administrator = Depends(get_current_admin)
+):
+    """
+    Manually triggers dispatch of emails queued due to daily quota limits.
+    """
+    from app.tasks.email_tasks import dispatch_queued_notifications
+    res = dispatch_queued_notifications()
     return res
 
 @router.delete("/reset-all-data")
