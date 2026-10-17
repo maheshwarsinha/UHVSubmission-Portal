@@ -126,7 +126,7 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
           required={true}
           fileType="video"
           allowedExts=".mp4, .mov, .webm"
-          maxSizeMb={config?.max_video_size_mb || 500}
+          maxSizeMb={config?.max_video_size_mb || 1024}
           icon={<Video className="w-6 h-6 text-indigo-600" />}
           colorClass="border-indigo-200 bg-indigo-50/20"
           isStudentReady={isStudentReady}

@@ -577,7 +577,7 @@ class GDriveLinkService:
         }
 
         try:
-            with httpx.Client(follow_redirects=True, timeout=300.0, headers=headers) as client:
+            with httpx.Client(follow_redirects=True, timeout=900.0, headers=headers) as client:
                 res = client.get(url, params={"id": file_id})
                 
                 # Check for confirm token (used for files > 100MB by Google)

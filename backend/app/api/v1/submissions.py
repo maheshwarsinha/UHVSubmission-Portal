@@ -294,6 +294,17 @@ def submit_assignment(
     if CELERY_AVAILABLE and settings.REDIS_URL and "localhost" not in settings.REDIS_URL and "127.0.0.1" not in settings.REDIS_URL:
         use_celery = True
 
+    # IMPORTANT: Enqueue immediate email dispatch FIRST so both student receipt and teacher alert
+    # are sent immediately (< 1s) without being delayed by large file transfers to Google Drive.
+    if use_celery:
+        try:
+            send_submission_emails_task.delay(submission.id)
+        except Exception:
+            background_tasks.add_task(execute_email_dispatch, submission.id)
+    else:
+        background_tasks.add_task(execute_email_dispatch, submission.id)
+
+    # Enqueue file transfers to Google Drive
     for sub_file in created_files:
         if use_celery:
             try:
@@ -302,14 +313,6 @@ def submit_assignment(
                 background_tasks.add_task(execute_drive_transfer, submission.id, sub_file.id)
         else:
             background_tasks.add_task(execute_drive_transfer, submission.id, sub_file.id)
-
-    if use_celery:
-        try:
-            send_submission_emails_task.delay(submission.id)
-        except Exception:
-            background_tasks.add_task(execute_email_dispatch, submission.id)
-    else:
-        background_tasks.add_task(execute_email_dispatch, submission.id)
 
     return build_receipt_response(submission)
 

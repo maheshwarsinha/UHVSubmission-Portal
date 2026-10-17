@@ -134,10 +134,17 @@ def get_network_info(request: Request, db: Session = Depends(get_db)):
     # 3. Tertiary: Fallback to Host header if access came through a non-localhost IP
     host_header = request.headers.get("host", "").split(":")[0]
     if not wifi_ip and host_header and host_header not in ("localhost", "127.0.0.1", "backend"):
-        wifi_ip = host_header
+        if not ("onrender.com" in host_header or "render.com" in host_header):
+            wifi_ip = host_header
 
-    if not wifi_ip:
-        wifi_ip = "localhost"
+    # In cloud deployments (e.g. Render backend with Vercel frontend), point to public portal URL
+    if not wifi_ip or "onrender.com" in wifi_ip or "render.com" in wifi_ip:
+        public_url = getattr(settings, "FRONTEND_URL", "https://uhv-submission-portal.vercel.app")
+        return {
+            "wifi_ip": "uhv-submission-portal.vercel.app",
+            "portal_url": public_url,
+            "port": 443
+        }
 
     return {
         "wifi_ip": wifi_ip,

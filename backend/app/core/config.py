@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     ENVIRONMENT: str = "development"
     PROJECT_NAME: str = "UHV Assignment Submission Portal"
+    FRONTEND_URL: str = "https://uhv-submission-portal.vercel.app"
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = "super_secret_uhv_key_2026_change_in_production_32chars"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
@@ -97,7 +98,7 @@ class Settings(BaseSettings):
     ALLOWED_YEARS: List[str] = ["2nd Year", "3rd Year", "4th Year"]
     MAX_PPT_SIZE_MB: int = 50
     MAX_PDF_SIZE_MB: int = 25
-    MAX_VIDEO_SIZE_MB: int = 500
+    MAX_VIDEO_SIZE_MB: int = 1024
     PDF_OPTIONAL_ALLOWED: bool = True
     PDF_REQUIRED: bool = False
     VIDEO_ALLOWED_EXTENSIONS: List[str] = ["mp4", "mov", "webm"]

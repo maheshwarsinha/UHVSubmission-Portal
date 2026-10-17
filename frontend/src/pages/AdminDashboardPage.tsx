@@ -46,8 +46,18 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
     }
   };
 
+  const getSubmissionUrl = () => {
+    if (wifiInfo?.portal_url && !wifiInfo.portal_url.includes('onrender.com') && !wifiInfo.portal_url.includes('localhost')) {
+      return wifiInfo.portal_url;
+    }
+    if (typeof window !== 'undefined' && window.location.origin && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1')) {
+      return window.location.origin;
+    }
+    return wifiInfo?.portal_url || 'https://uhv-submission-portal.vercel.app';
+  };
+
   const handleCopyWifiLink = () => {
-    const url = wifiInfo?.portal_url || `http://${window.location.hostname}`;
+    const url = getSubmissionUrl();
     navigator.clipboard.writeText(url);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);
@@ -586,18 +596,18 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11px] font-bold uppercase tracking-wider text-brand-200 bg-brand-900/60 px-2 py-0.5 rounded border border-brand-700">
-                Student Wi-Fi Submission URL
+                {getSubmissionUrl().includes('vercel.app') || (!getSubmissionUrl().includes('192.168.') && !getSubmissionUrl().includes('10.') && !getSubmissionUrl().includes('172.')) ? 'Student Portal URL' : 'Student Wi-Fi Submission URL'}
               </span>
               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                ● Live on Campus Network
+                ● {getSubmissionUrl().includes('vercel.app') ? 'Live Online Portal' : 'Live on Campus Network'}
               </span>
             </div>
             <p className="text-xs text-slate-300 mt-1">
-              Give this exact address to students on your Wi-Fi network (No port required):
+              Give this exact address to students to submit their assignment:
             </p>
             <div className="flex flex-wrap items-center gap-2 mt-2">
               <span className="font-mono text-sm sm:text-base md:text-lg font-black text-white bg-black/40 px-3 py-1 rounded-lg border border-white/10 select-all tracking-wider break-all">
-                {wifiInfo?.portal_url || `http://${window.location.hostname}`}
+                {getSubmissionUrl()}
               </span>
               <button
                 onClick={handleCopyWifiLink}
@@ -607,7 +617,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                 <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
               </button>
               <a
-                href={wifiInfo?.portal_url || `http://${window.location.hostname}`}
+                href={getSubmissionUrl()}
                 target="_blank"
                 rel="noreferrer"
                 className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-semibold transition-all border border-white/20 flex items-center space-x-1"
@@ -1567,7 +1577,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                   <label className="block font-bold text-slate-700 mb-1">Max Video (MB)</label>
                   <input
                     type="number"
-                    value={settingsData.max_video_size_mb || 500}
+                    value={settingsData.max_video_size_mb || 1024}
                     onChange={(e) => setSettingsData({ ...settingsData, max_video_size_mb: parseInt(e.target.value) })}
                     className="w-full p-2 border rounded-lg"
                   />
