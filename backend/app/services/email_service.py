@@ -21,6 +21,61 @@ class EmailService:
 
     @classmethod
     def send_smtp_email(cls, recipient: str, subject: str, html_content: str, text_content: str) -> Tuple[bool, str]:
+        # 1. Option A: Resend HTTP API (Port 443 - Recommended for Render Free Tier)
+        if getattr(settings, "RESEND_API_KEY", None):
+            try:
+                import httpx
+                headers = {
+                    "Authorization": f"Bearer {settings.RESEND_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+                from_addr = settings.EMAIL_FROM
+                # If using free default domain on resend
+                if not from_addr or "@gmail.com" in from_addr:
+                    from_addr = "UHV Portal <onboarding@resend.dev>"
+                payload = {
+                    "from": from_addr,
+                    "to": [recipient],
+                    "subject": subject,
+                    "html": html_content,
+                    "text": text_content
+                }
+                res = httpx.post("https://api.resend.com/emails", headers=headers, json=payload, timeout=15.0)
+                if res.status_code in (200, 201):
+                    msg_id = res.json().get("id", "RESEND_OK")
+                    logger.info(f"Email successfully delivered to {recipient} via Resend HTTPS API (ID: {msg_id})")
+                    return True, f"RESEND_{msg_id}"
+                else:
+                    logger.warning(f"Resend HTTP dispatch failed ({res.status_code}: {res.text}), trying fallbacks...")
+            except Exception as resend_err:
+                logger.warning(f"Resend HTTP API error: {resend_err}, trying fallbacks...")
+
+        # 2. Option B: Brevo HTTP API (Port 443 - 300 emails/day free, zero credit card)
+        if getattr(settings, "BREVO_API_KEY", None):
+            try:
+                import httpx
+                headers = {
+                    "api-key": settings.BREVO_API_KEY,
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "sender": {"email": settings.EMAIL_FROM or "maheshwarsinha01@gmail.com", "name": "UHV Assignment Portal"},
+                    "to": [{"email": recipient}],
+                    "subject": subject,
+                    "htmlContent": html_content,
+                    "textContent": text_content
+                }
+                res = httpx.post("https://api.brevo.com/v3/smtp/email", headers=headers, json=payload, timeout=15.0)
+                if res.status_code in (200, 201):
+                    msg_id = res.json().get("messageId", "BREVO_OK")
+                    logger.info(f"Email successfully delivered to {recipient} via Brevo HTTPS API (ID: {msg_id})")
+                    return True, f"BREVO_{msg_id}"
+                else:
+                    logger.warning(f"Brevo HTTP dispatch failed ({res.status_code}: {res.text}), trying fallbacks...")
+            except Exception as brevo_err:
+                logger.warning(f"Brevo HTTP API error: {brevo_err}, trying fallbacks...")
+
+        # 3. Option C: Standard SMTP (Works locally on Windows/Linux with open ports)
         if not settings.SMTP_ENABLED or not settings.SMTP_USER or not settings.SMTP_PASSWORD:
             logger.info(f"[SIMULATION] Email to {recipient} simulated. Subject: '{subject}'")
             return True, f"SIMULATED_MSG_{int(datetime.now().timestamp())}"
@@ -42,11 +97,16 @@ class EmailService:
                 server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
                 server.sendmail(msg["From"], [recipient], msg.as_string())
 
-            logger.info(f"Email successfully delivered to {recipient}")
+            logger.info(f"Email successfully delivered to {recipient} via SMTP")
             return True, f"SMTP_MSG_{int(datetime.now().timestamp())}"
         except Exception as e:
+            err_str = str(e)
+            if "101" in err_str or "unreachable" in err_str.lower():
+                err_msg = "[Errno 101] Network is unreachable (Render Free Tier blocks outbound SMTP ports 25, 465, 587. Please configure RESEND_API_KEY in Render Environment Variables for HTTPS port 443 dispatch)."
+                logger.error(f"Email blocked by cloud host firewall: {err_msg}")
+                return False, err_msg
             logger.error(f"Failed to deliver email to {recipient}: {e}")
-            return False, str(e)
+            return False, err_str
 
     @classmethod
     def send_student_receipt(

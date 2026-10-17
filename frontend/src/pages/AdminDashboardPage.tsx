@@ -3,7 +3,7 @@ import {
   Users, CheckCircle, Clock, Calendar, AlertTriangle, Download, RefreshCw,
   Search, SlidersHorizontal, LogOut, Settings as SettingsIcon,
   HardDrive, FileText, Cloud, Layers, X, Eye, Trash2,
-  Wifi, Copy, Check, ExternalLink, Share2, FileSpreadsheet, Loader2, Folder
+  Wifi, Copy, Check, ExternalLink, Share2, FileSpreadsheet, Loader2, Folder, Mail
 } from 'lucide-react';
 import { apiService } from '../services/api';
 import { AdminMetrics } from '../types';
@@ -155,6 +155,42 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
   };
 
   const [exportLoading, setExportLoading] = useState<'excel' | 'csv' | 'share' | null>(null);
+  const [testEmailLoading, setTestEmailLoading] = useState<boolean>(false);
+  const [resendEmailLoading, setResendEmailLoading] = useState<string | null>(null);
+
+  const handleTestEmail = async () => {
+    const target = prompt('Enter recipient email to test delivery:', 'maheshwarsinha7@gmail.com');
+    if (!target || !target.trim()) return;
+    setTestEmailLoading(true);
+    try {
+      const res = await apiService.testEmail(target.trim());
+      if (res.success) {
+        alert(`✅ Test email delivered successfully to ${res.recipient}!\nDetails: ${res.message}`);
+      } else {
+        alert(`❌ Email Delivery Result:\n${res.message}`);
+      }
+    } catch (err: any) {
+      alert(`❌ Test email failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setTestEmailLoading(false);
+    }
+  };
+
+  const handleResendEmail = async (submissionId: string) => {
+    setResendEmailLoading(submissionId);
+    try {
+      const res = await apiService.resendSubmissionEmail(submissionId);
+      if (res.student_email_sent) {
+        alert('✅ Email receipt delivered successfully to student and teacher alert dispatched!');
+      } else {
+        alert(`⚠️ Email delivery status: ${res.status || 'Notice'}\nResult: ${res.message || 'Check notification records'}`);
+      }
+    } catch (err: any) {
+      alert(`Failed to send email: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setResendEmailLoading(null);
+    }
+  };
 
   const getCurrentFilters = () => ({
     section: sectionFilter || undefined,
@@ -487,6 +523,20 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
               <Download className="w-4 h-4 text-slate-500" />
             )}
             <span>CSV</span>
+          </button>
+
+          <button
+            onClick={handleTestEmail}
+            disabled={testEmailLoading}
+            className="flex items-center space-x-1.5 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+            title="Send a live test email to verify transactional mailing"
+          >
+            {testEmailLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+            ) : (
+              <Mail className="w-4 h-4 text-indigo-600" />
+            )}
+            <span>{testEmailLoading ? 'Testing...' : 'Test Email'}</span>
           </button>
 
           <button
@@ -1061,16 +1111,32 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                     Submitted From IP: <span className="font-mono font-bold text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">{selectedSub.ip_address || 'Unknown'}</span>
                   </p>
                 </div>
-                {selectedSub.status !== 'COMPLETED' && (
+                <div className="flex flex-wrap items-center gap-2">
                   <button
-                    onClick={() => handlePushToDrive(selectedSub.id)}
-                    disabled={driveActionLoading === selectedSub.id}
-                    className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold shadow-2xs transition-colors cursor-pointer text-xs"
+                    onClick={() => handleResendEmail(selectedSub.id)}
+                    disabled={resendEmailLoading === selectedSub.id}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-2xs transition-colors cursor-pointer text-xs"
+                    title="Dispatch student email receipt and teacher alert"
                   >
-                    <Cloud className="w-4 h-4" />
-                    <span>{driveActionLoading === selectedSub.id ? 'Uploading...' : 'Upload to Drive Now'}</span>
+                    {resendEmailLoading === selectedSub.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Mail className="w-3.5 h-3.5" />
+                    )}
+                    <span>{resendEmailLoading === selectedSub.id ? 'Sending...' : 'Send Email Receipt'}</span>
                   </button>
-                )}
+
+                  {selectedSub.status !== 'COMPLETED' && (
+                    <button
+                      onClick={() => handlePushToDrive(selectedSub.id)}
+                      disabled={driveActionLoading === selectedSub.id}
+                      className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold shadow-2xs transition-colors cursor-pointer text-xs"
+                    >
+                      <Cloud className="w-4 h-4" />
+                      <span>{driveActionLoading === selectedSub.id ? 'Uploading...' : 'Upload to Drive Now'}</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Student Shared Folder Card */}

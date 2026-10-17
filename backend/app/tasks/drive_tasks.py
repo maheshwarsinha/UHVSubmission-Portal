@@ -109,6 +109,7 @@ def upload_file_to_gdrive_task(self_or_sub_id, submission_id_or_file_id=None, fi
             sub_file.admin_drive_url = web_link
             sub_file.upload_status = "DRIVE_COMPLETED"
             sub_file.verification_status = True
+            sub_file.error_message = None
             job.status = "COMPLETED"
             db.commit()
 
@@ -194,6 +195,7 @@ def execute_drive_transfer(submission_id: str, file_id: str) -> dict:
             sub_file.admin_drive_url = web_link
             sub_file.upload_status = "DRIVE_COMPLETED"
             sub_file.verification_status = True
+            sub_file.error_message = None
             db.commit()
 
             pending_files = db.query(SubmissionFile).filter(

@@ -1,5 +1,5 @@
 import os
-from typing import List, Union
+from typing import List, Union, Optional
 from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import json
@@ -121,6 +121,8 @@ class Settings(BaseSettings):
     SMTP_TLS: bool = True
     EMAIL_FROM: str = "maheshwarsinha01@gmail.com"
     TEACHER_EMAIL: str = "maheshwarsinha7@gmail.com"
+    RESEND_API_KEY: Optional[str] = None
+    BREVO_API_KEY: Optional[str] = None
 
     # Initial Superuser / Admin Credentials
     FIRST_SUPERUSER_EMAIL: str = "admin@uhv-portal.edu.in"

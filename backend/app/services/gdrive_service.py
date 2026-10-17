@@ -111,6 +111,13 @@ class GDriveService:
                     file_metadata["parents"] = [parent_folder_id]
                 folder = self.service.files().create(body=file_metadata, fields="id").execute()
                 folder_id = folder.get("id")
+                try:
+                    self.service.permissions().create(
+                        fileId=folder_id,
+                        body={"role": "reader", "type": "anyone"}
+                    ).execute()
+                except Exception:
+                    pass
 
             self._folder_cache[cache_key] = folder_id
             if self.redis_client:
@@ -275,7 +282,7 @@ class GDriveService:
                 local_file_path,
                 mimetype=mime_type,
                 resumable=True,
-                chunksize=5 * 1024 * 1024  # 5MB chunks to Google Drive
+                chunksize=1024 * 1024  # 1MB chunks to prevent read timeouts on cloud hosts
             )
 
             request = self.service.files().create(
@@ -285,10 +292,20 @@ class GDriveService:
             )
 
             response = None
+            retries_left = 5
             while response is None:
-                status, response = request.next_chunk()
-                if status:
-                    logger.debug(f"Uploading {target_filename} to Drive: {int(status.progress() * 100)}%")
+                try:
+                    status, response = request.next_chunk()
+                    if status:
+                        logger.debug(f"Uploading {target_filename} to Drive: {int(status.progress() * 100)}%")
+                except Exception as chunk_err:
+                    if retries_left > 0:
+                        retries_left -= 1
+                        logger.warning(f"Retrying chunk upload for {target_filename} due to timeout/error: {chunk_err}. Retries left: {retries_left}")
+                        import time
+                        time.sleep(2)
+                        continue
+                    raise chunk_err
 
             drive_id = response.get("id")
             web_link = response.get("webViewLink") or f"https://drive.google.com/file/d/{drive_id}/view"

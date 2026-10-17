@@ -547,21 +547,29 @@ class GDriveLinkService:
         Downloads a public Google Drive file into dest_path.
         Handles large-file virus-scan confirmation pages.
         """
+        dest_dir = os.path.dirname(dest_path)
+        if dest_dir:
+            os.makedirs(dest_dir, exist_ok=True)
+
         # 1. Try using official Google Drive API client if available
         if gdrive_service.service and gdrive_service.enabled:
             try:
                 from googleapiclient.http import MediaIoBaseDownload
                 request = gdrive_service.service.files().get_media(fileId=file_id)
-                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
                 with open(dest_path, "wb") as fh:
-                    downloader = MediaIoBaseDownload(fh, request, chunksize=5 * 1024 * 1024)
+                    downloader = MediaIoBaseDownload(fh, request, chunksize=1024 * 1024)
                     done = False
                     while not done:
                         status, done = downloader.next_chunk()
                 if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
                     return True, "Downloaded via Drive API successfully."
             except Exception as api_err:
-                logger.warning(f"Drive API get_media failed ({api_err}), falling back to web download...")
+                logger.info(f"Drive API get_media skipped/failed ({api_err}), falling back to web download...")
+                if os.path.exists(dest_path):
+                    try:
+                        os.remove(dest_path)
+                    except Exception:
+                        pass
 
         url = "https://drive.google.com/uc?export=download"
         headers = {
@@ -569,7 +577,7 @@ class GDriveLinkService:
         }
 
         try:
-            with httpx.Client(follow_redirects=True, timeout=120.0, headers=headers) as client:
+            with httpx.Client(follow_redirects=True, timeout=300.0, headers=headers) as client:
                 res = client.get(url, params={"id": file_id})
                 
                 # Check for confirm token (used for files > 100MB by Google)
@@ -594,7 +602,8 @@ class GDriveLinkService:
                     if stream_resp.status_code != 200:
                         return False, f"Failed to download from Drive. HTTP status: {stream_resp.status_code}"
 
-                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                    if dest_dir:
+                        os.makedirs(dest_dir, exist_ok=True)
                     with open(dest_path, "wb") as f:
                         for chunk in stream_resp.iter_bytes(chunk_size=1024 * 1024):
                             if chunk:
@@ -606,6 +615,11 @@ class GDriveLinkService:
                 return False, "Downloaded file is empty."
         except Exception as e:
             logger.error(f"Error downloading file {file_id}: {e}")
+            if os.path.exists(dest_path):
+                try:
+                    os.remove(dest_path)
+                except Exception:
+                    pass
             return False, str(e)
 
     @classmethod
@@ -619,11 +633,14 @@ class GDriveLinkService:
     ) -> Tuple[bool, Optional[str], Optional[str], str]:
         """
         Transfers a student's shared Drive file to Admin's Google Drive inside section/roll_number.
-        First tries instant cloud-to-cloud copy via Google Drive API.
-        Falls back to transient streaming download and upload if direct copy is restricted.
+        First checks if the file already exists in Admin's Drive.
+        Then tries instant cloud-to-cloud copy via Google Drive API.
+        Falls back to isolated transient streaming download and upload if direct copy is restricted.
         Returns: (success, admin_drive_id, admin_web_link, message)
         """
-        # 1. Attempt instant cloud-to-cloud copy via Google Drive API
+        import uuid
+
+        # 1. Resolve parent folders in Admin Google Drive
         if gdrive_service.service and gdrive_service.enabled:
             try:
                 root_id = gdrive_service.get_or_create_folder(settings.GDRIVE_ROOT_FOLDER_NAME)
@@ -635,6 +652,30 @@ class GDriveLinkService:
                         parent_id = roll_folder_id
 
                 if parent_id:
+                    # Check if target file already exists in Admin Drive folder
+                    q_existing = f"'{parent_id}' in parents and name = '{expected_filename}' and trashed = false"
+                    existing_res = gdrive_service.service.files().list(
+                        q=q_existing,
+                        spaces="drive",
+                        fields="files(id, webViewLink, size)"
+                    ).execute()
+                    existing_files = existing_res.get("files", [])
+
+                    if existing_files:
+                        drive_id = existing_files[0]["id"]
+                        web_link = existing_files[0].get("webViewLink") or f"https://drive.google.com/file/d/{drive_id}/view"
+                        # Ensure public link access
+                        try:
+                            gdrive_service.service.permissions().create(
+                                fileId=drive_id,
+                                body={"role": "reader", "type": "anyone"}
+                            ).execute()
+                        except Exception:
+                            pass
+                        logger.info(f"File {expected_filename} already archived in Google Drive (ID: {drive_id}). Reusing.")
+                        return True, drive_id, web_link, "File already archived in Admin Google Drive."
+
+                    # Try direct cloud-to-cloud copy
                     copy_body = {
                         "name": expected_filename,
                         "parents": [parent_id]
@@ -660,17 +701,18 @@ class GDriveLinkService:
                     logger.info(f"Direct Drive API copy succeeded for {expected_filename} (ID: {drive_id})")
                     return True, drive_id, web_link, "Directly copied to Admin Drive."
             except Exception as copy_err:
-                logger.warning(f"Direct Drive copy failed for {source_file_id} ({copy_err}), falling back to transient download...")
+                logger.info(f"Direct Drive copy skipped for {source_file_id} ({copy_err}), falling back to transient download...")
 
-        # 2. Fallback: Download to transient local file and upload
+        # 2. Fallback: Download to uniquely isolated transient local file and upload
         from app.services.upload_service import UploadService
         temp_dir = os.path.join(UploadService.get_upload_dir(), "temp_transfers")
         os.makedirs(temp_dir, exist_ok=True)
 
-        temp_file_path = os.path.join(temp_dir, f"transient_{source_file_id}_{expected_filename}")
+        unique_prefix = uuid.uuid4().hex[:8]
+        temp_file_path = os.path.join(temp_dir, f"transient_{unique_prefix}_{source_file_id}_{expected_filename}")
 
         try:
-            logger.info(f"Starting transient download for Drive file: {source_file_id}")
+            logger.info(f"Starting transient download for Drive file: {source_file_id} to {temp_file_path}")
             dl_success, dl_msg = cls.download_public_file(source_file_id, temp_file_path)
             if not dl_success:
                 logger.error(f"Download failed for {source_file_id}: {dl_msg}")
@@ -687,7 +729,7 @@ class GDriveLinkService:
             return up_success, drive_id, web_link, up_msg
 
         finally:
-            # IMMEDIATE CLEANUP: As requested by user, the temporary file is purged immediately
+            # IMMEDIATE CLEANUP: The uniquely named temporary file is purged immediately
             if os.path.exists(temp_file_path):
                 try:
                     os.remove(temp_file_path)

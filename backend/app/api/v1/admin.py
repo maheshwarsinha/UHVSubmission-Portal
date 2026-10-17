@@ -676,6 +676,62 @@ def transfer_single_submission_file(
     res = execute_drive_transfer(submission_id, file_id)
     return res
 
+@router.post("/test-email")
+def send_test_email(
+    target_email: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_admin: Administrator = Depends(get_current_admin)
+):
+    """
+    Sends a test email to verify transactional email delivery via Resend/Brevo/SMTP.
+    """
+    from app.services.email_service import email_service
+    recipient = target_email or settings.TEACHER_EMAIL or settings.EMAIL_FROM
+    if not recipient:
+        raise HTTPException(status_code=400, detail="No recipient email address configured.")
+
+    subject = "[UHV Portal] Live Email Delivery Test"
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 500px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+        <h3 style="color: #0284c7; margin-top: 0;">UHV Portal Email Test</h3>
+        <p>This is a live test email dispatched from the UHV Assignment Portal administration console.</p>
+        <p><b>Timestamp:</b> {email_service.get_ist_time_str()}</p>
+        <p><b>Admin:</b> {current_admin.email}</p>
+        <p style="color: #16a34a; font-weight: bold;">Transactional email delivery is operating correctly.</p>
+    </div>
+    """
+    text_content = f"UHV Portal Email Test. Sent at {email_service.get_ist_time_str()} by {current_admin.email}."
+
+    success, msg = email_service.send_smtp_email(recipient, subject, html_content, text_content)
+
+    log_audit(
+        db,
+        admin_id=current_admin.id,
+        action="TEST_EMAIL",
+        resource_type="Email",
+        resource_id=recipient,
+        details={"success": success, "message": msg}
+    )
+
+    return {
+        "success": success,
+        "recipient": recipient,
+        "message": msg
+    }
+
+@router.post("/submissions/{submission_id}/resend-email")
+def resend_submission_emails(
+    submission_id: str,
+    db: Session = Depends(get_db),
+    current_admin: Administrator = Depends(get_current_admin)
+):
+    """
+    Manually triggers email dispatch (student confirmation & teacher notification) for a submission.
+    """
+    from app.tasks.email_tasks import execute_email_dispatch
+    res = execute_email_dispatch(submission_id)
+    return res
+
 @router.delete("/reset-all-data")
 def reset_all_portal_data(
     db: Session = Depends(get_db),

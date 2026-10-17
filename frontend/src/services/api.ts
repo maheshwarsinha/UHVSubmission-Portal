@@ -165,6 +165,16 @@ export const apiService = {
     return res.data;
   },
 
+  async testEmail(targetEmail?: string) {
+    const res = await api.post('/admin/test-email', null, { params: targetEmail ? { target_email: targetEmail } : {} });
+    return res.data;
+  },
+
+  async resendSubmissionEmail(submissionId: string) {
+    const res = await api.post(`/admin/submissions/${submissionId}/resend-email`);
+    return res.data;
+  },
+
   getCsvExportUrl(filters: { section?: string; branch?: string; category?: string; deadline_status?: string; search?: string; sort_by?: string; sort_order?: string } = {}) {
     const params = new URLSearchParams();
     const token = localStorage.getItem('uhv_admin_token');
