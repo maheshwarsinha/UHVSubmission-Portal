@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 os.environ["USE_SQLITE"] = "true"
 os.environ["ENVIRONMENT"] = "testing"
 os.environ["UPLOAD_DIR"] = "./data/test_uploads"
+os.environ["SMTP_ENABLED"] = "false"
 
 from app.core.database import Base, get_db
 from app.main import app

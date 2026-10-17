@@ -119,8 +119,8 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_TLS: bool = True
-    EMAIL_FROM: str = "uhv.assignment.portal@gmail.com"
-    TEACHER_EMAIL: str = "teacher.uhv@university.edu.in"
+    EMAIL_FROM: str = "maheshwarsinha01@gmail.com"
+    TEACHER_EMAIL: str = "maheshwarsinha01@gmail.com"
 
     # Initial Superuser / Admin Credentials
     FIRST_SUPERUSER_EMAIL: str = "admin@uhv-portal.edu.in"
