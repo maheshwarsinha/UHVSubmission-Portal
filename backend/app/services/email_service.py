@@ -45,6 +45,22 @@ class EmailService:
                     msg_id = res.json().get("id", "RESEND_OK")
                     logger.info(f"Email successfully delivered to {recipient} via Resend HTTPS API (ID: {msg_id})")
                     return True, f"RESEND_{msg_id}"
+                elif res.status_code == 403 and "only send testing emails to your own email address" in res.text:
+                    logger.warning(f"Resend testing mode restriction for {recipient}. Checking fallbacks or backup delivery...")
+                    teacher_email = settings.TEACHER_EMAIL or "maheshwarsinha7@gmail.com"
+                    if recipient != teacher_email:
+                        backup_payload = {
+                            "from": from_addr,
+                            "to": [teacher_email],
+                            "subject": f"[Forward to {recipient}] {subject}",
+                            "html": f"<div style='background:#fef3c7;padding:12px;border:1px solid #fde68a;border-radius:6px;margin-bottom:15px;color:#92400e;font-size:12px;'><b>Notice:</b> This submission receipt was delivered to your teacher inbox because Resend testing mode only delivers to your registered account address until a domain is verified or BREVO_API_KEY is added. Intended student recipient: <b>{recipient}</b></div>" + html_content,
+                            "text": f"Notice: Intended student recipient: {recipient}\n\n" + text_content
+                        }
+                        bk_res = httpx.post("https://api.resend.com/emails", headers=headers, json=backup_payload, timeout=15.0)
+                        if bk_res.status_code in (200, 201):
+                            bk_id = bk_res.json().get("id", "BACKUP_OK")
+                            logger.info(f"Delivered backup receipt to teacher email {teacher_email} for student {recipient}")
+                            return True, f"RESEND_BACKUP_TO_TEACHER_{bk_id}"
                 else:
                     logger.warning(f"Resend HTTP dispatch failed ({res.status_code}: {res.text}), trying fallbacks...")
             except Exception as resend_err:
