@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     SERVER_PORT: int = 8000
 
     # CORS
-    BACKEND_CORS_ORIGINS: List[str] = [
+    BACKEND_CORS_ORIGINS: Union[List[str], str] = [
         "http://localhost:5173",
         "http://localhost:3000",
         "http://127.0.0.1:5173",
@@ -41,16 +41,19 @@ class Settings(BaseSettings):
         "*"
     ]
 
-    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
-    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
-        if isinstance(v, str):
-            if v.startswith("[") and v.endswith("]"):
+    @property
+    def cors_origins(self) -> List[str]:
+        if isinstance(self.BACKEND_CORS_ORIGINS, list):
+            return self.BACKEND_CORS_ORIGINS
+        if isinstance(self.BACKEND_CORS_ORIGINS, str):
+            val = self.BACKEND_CORS_ORIGINS.strip()
+            if val.startswith("[") and val.endswith("]"):
                 try:
-                    return json.loads(v)
+                    return json.loads(val)
                 except Exception:
                     pass
-            return [i.strip() for i in v.split(",") if i.strip()]
-        return v
+            return [x.strip() for x in val.split(",") if x.strip()]
+        return ["*"]
 
     # PostgreSQL Database
     POSTGRES_SERVER: str = "localhost"
