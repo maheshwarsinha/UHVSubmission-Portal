@@ -98,6 +98,7 @@ def test_verify_drive_folder_endpoint(client):
 
 def test_submit_assignment_with_drive_links(client):
     import uuid
+    from unittest.mock import patch
     uid = uuid.uuid4().hex[:6]
     roll = f"25001{uid}"
     payload = {
@@ -131,12 +132,14 @@ def test_submit_assignment_with_drive_links(client):
             }
         ]
     }
-    res = client.post("/api/v1/submissions", json=payload)
-    assert res.status_code == 200
-    data = res.json()
-    assert "UHV-2026-" in data["tracking_id"]
-    assert len(data["files"]) == 2
-    assert data["files"][0]["source_drive_url"] is not None
-    assert data["source_folder_url"] == "https://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
-    assert data["folder_name"] == roll
+    with patch("app.api.v1.submissions.execute_email_dispatch", return_value={"status": "mocked"}), \
+         patch("app.api.v1.submissions.execute_drive_transfer", return_value={"status": "mocked"}):
+        res = client.post("/api/v1/submissions", json=payload)
+        assert res.status_code == 200
+        data = res.json()
+        assert "UHV-2026-" in data["tracking_id"]
+        assert len(data["files"]) == 2
+        assert data["files"][0]["source_drive_url"] is not None
+        assert data["source_folder_url"] == "https://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
+        assert data["folder_name"] == roll
 
