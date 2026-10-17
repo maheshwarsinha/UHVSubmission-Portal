@@ -36,7 +36,7 @@ class EmailService:
                         "api-key": settings.BREVO_API_KEY,
                         "Content-Type": "application/json"
                     }
-                    sender_email = settings.EMAIL_FROM or settings.SMTP_USER or "maheshwarsinha01@gmail.com"
+                    sender_email = settings.EMAIL_FROM or "maheshwarsinha7@gmail.com"
                     payload = {
                         "sender": {"email": sender_email, "name": "UHV Assignment Portal"},
                         "to": [{"email": recipient}],

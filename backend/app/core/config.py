@@ -119,7 +119,7 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_TLS: bool = True
-    EMAIL_FROM: str = "maheshwarsinha01@gmail.com"
+    EMAIL_FROM: str = "maheshwarsinha7@gmail.com"
     TEACHER_EMAIL: str = "maheshwarsinha7@gmail.com"
     RESEND_API_KEY: Optional[str] = None
     BREVO_API_KEY: Optional[str] = None

@@ -539,6 +539,17 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
             <span>{testEmailLoading ? 'Testing...' : 'Test Email'}</span>
           </button>
 
+          <a
+            href="https://drive.google.com/drive/folders/1_tM2I4olNVqXC-R0iw1vXrfFee25iIDx"
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center space-x-1.5 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold shadow-2xs transition-colors"
+            title="Open institutional root submissions folder in Google Drive"
+          >
+            <Folder className="w-4 h-4 text-indigo-600" />
+            <span>Admin Google Drive ↗</span>
+          </a>
+
           <button
             onClick={handleResetAllData}
             className="flex items-center space-x-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold shadow-2xs transition-colors cursor-pointer"
@@ -1069,7 +1080,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
 
                       {/* Admin Backup Status */}
                       <td className="py-3 px-4">
-                        <div className="space-y-0.5">
+                        <div className="space-y-1">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold inline-block ${
                             sub.drive_completed
                               ? 'bg-emerald-100 text-emerald-800'
@@ -1077,17 +1088,30 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                           }`}>
                             {sub.drive_completed ? 'Archived in Drive' : 'Drive Pending'}
                           </span>
-                          {adminUrl && (
-                            <a
-                              href={adminUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="block text-[10px] font-semibold text-brand-600 hover:underline"
-                              title="Open backed-up file in Admin Drive"
-                            >
-                              Admin Drive ↗
-                            </a>
-                          )}
+                          <div className="flex flex-wrap items-center gap-1">
+                            {pptFile && (pptFile.admin_drive_url || pptFile.drive_file_id) && (
+                              <a
+                                href={pptFile.admin_drive_url?.startsWith('http') && !pptFile.admin_drive_url.includes('/presentation/d/') ? pptFile.admin_drive_url : `https://drive.google.com/file/d/${pptFile.drive_file_id}/view`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200 transition-colors"
+                                title="Open PPT Preview in Google Drive"
+                              >
+                                <span>📊 PPT ↗</span>
+                              </a>
+                            )}
+                            {vidFile && (vidFile.admin_drive_url || vidFile.drive_file_id) && (
+                              <a
+                                href={vidFile.admin_drive_url || `https://drive.google.com/file/d/${vidFile.drive_file_id}/view`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-800 hover:bg-indigo-100 border border-indigo-200 transition-colors"
+                                title="Watch Video in Google Drive"
+                              >
+                                <span>🎬 Video ↗</span>
+                              </a>
+                            )}
+                          </div>
                         </div>
                       </td>
                     <td className="py-3 px-4 text-right">

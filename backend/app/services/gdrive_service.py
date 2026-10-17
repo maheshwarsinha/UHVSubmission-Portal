@@ -308,7 +308,7 @@ class GDriveService:
                     raise chunk_err
 
             drive_id = response.get("id")
-            web_link = response.get("webViewLink") or f"https://drive.google.com/file/d/{drive_id}/view"
+            web_link = f"https://drive.google.com/file/d/{drive_id}/view"
             
             # Make file viewable with link
             try:
