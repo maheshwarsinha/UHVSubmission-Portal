@@ -90,9 +90,27 @@ async def lifespan(app: FastAPI):
     UploadService.get_upload_dir()
     logger.info("Temporary storage directories initialized.")
 
+    # 4. Background email queue watchdog (dispatches queued emails next day when 300 quota resets)
+    import asyncio
+    from app.tasks.email_tasks import dispatch_queued_notifications
+
+    async def _queue_watchdog():
+        await asyncio.sleep(15)
+        while True:
+            try:
+                dispatch_queued_notifications()
+            except asyncio.CancelledError:
+                break
+            except Exception as loop_err:
+                logger.warning(f"Background email queue watchdog notice: {loop_err}")
+            await asyncio.sleep(600)
+
+    watchdog_task = asyncio.create_task(_queue_watchdog())
+
     yield
 
     # Shutdown actions
+    watchdog_task.cancel()
     logger.info("Shutting down UHV Portal backend services cleanly...")
 
 app = FastAPI(

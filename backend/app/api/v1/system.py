@@ -1,6 +1,6 @@
 import os
 import json
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -20,10 +20,16 @@ def get_current_system_setting(db: Session, key: str, default_val):
     return record.value if record else default_val
 
 @router.get("/assignment-info", response_model=AssignmentPublicConfig)
-def get_assignment_info(db: Session = Depends(get_db)):
+def get_assignment_info(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
     """
     Returns the public assignment guidelines, rules, sections, and deadline for students.
+    Automatically checks and dispatches queued emails when free slots exist.
     """
+    from app.tasks.email_tasks import dispatch_queued_notifications
+    background_tasks.add_task(dispatch_queued_notifications)
     deadline_str = get_current_system_setting(db, "submission_deadline", settings.SUBMISSION_DEADLINE)
     is_open = get_current_system_setting(db, "submissions_open", settings.SUBMISSIONS_OPEN)
     allowed_sec = get_current_system_setting(db, "allowed_sections", settings.ALLOWED_SECTIONS)
