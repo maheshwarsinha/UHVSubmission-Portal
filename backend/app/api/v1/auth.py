@@ -15,13 +15,35 @@ def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
-    admin = db.query(Administrator).filter(Administrator.email == form_data.username.strip().lower()).first()
-    if not admin or not verify_password(form_data.password, admin.hashed_password):
+    input_identifier = form_data.username.strip().lower()
+
+    # 1. Try finding admin by exact email
+    admin = db.query(Administrator).filter(Administrator.email == input_identifier).first()
+
+    # 2. If not found by email, allow login with "admin" or configured ADMIN_USERNAME
+    configured_username = settings.ADMIN_USERNAME.strip().lower() if settings.ADMIN_USERNAME else ""
+    if not admin and (input_identifier == "admin" or (configured_username and input_identifier == configured_username)):
+        admin = db.query(Administrator).filter(Administrator.is_superuser == True).first()
+
+    if not admin:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Incorrect username/email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # 3. Check password against DB hash or env settings override
+    is_valid_pwd = verify_password(form_data.password, admin.hashed_password)
+    if not is_valid_pwd and settings.ADMIN_PASSWORD and form_data.password == settings.ADMIN_PASSWORD:
+        is_valid_pwd = True
+
+    if not is_valid_pwd:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username/email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     if not admin.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

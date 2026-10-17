@@ -84,6 +84,18 @@ class GDriveLinkService:
         clean_url = f"https://drive.google.com/drive/folders/{folder_id}" if folder_id else None
 
         if not folder_id:
+            # Check if student accidentally pasted a single file link instead of a folder link
+            is_file_link = any(p in folder_url for p in ["/file/d/", "/presentation/d/", "/document/d/", "/spreadsheets/d/", "drive.google.com/file"])
+            if is_file_link:
+                err_msg = "⚠️ You provided a link to an individual file (not a folder). Please place your PPT and Video files inside a Google Drive FOLDER, right-click the folder, choose 'Share' -> 'Copy link', and paste that folder link here."
+                user_msg = "Single file link provided. A Google Drive folder link is required."
+            elif "drive.google.com" not in folder_url and "docs.google.com" not in folder_url:
+                err_msg = "⚠️ Invalid link. Only Google Drive folder links (https://drive.google.com/drive/folders/...) are accepted. Other cloud links (OneDrive, Dropbox, etc.) are not supported."
+                user_msg = "Unsupported link format. Please provide a Google Drive folder link."
+            else:
+                err_msg = "⚠️ Could not extract a valid Google Drive folder ID. Please ensure the link is in the format: https://drive.google.com/drive/folders/..."
+                user_msg = "Invalid Google Drive folder link format."
+
             return {
                 "is_valid": False,
                 "folder_id": None,
@@ -98,9 +110,9 @@ class GDriveLinkService:
                 "video_file": None,
                 "pdf_file": None,
                 "all_files": [],
-                "errors": ["Invalid Google Drive folder link. Please provide a folder URL (e.g. https://drive.google.com/drive/folders/...)."],
+                "errors": [err_msg],
                 "checklist": [],
-                "message": "Invalid folder link format."
+                "message": user_msg
             }
 
         folder_name = None

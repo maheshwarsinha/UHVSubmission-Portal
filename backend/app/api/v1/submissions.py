@@ -288,9 +288,13 @@ def submit_assignment(
     db.refresh(submission)
 
     # 10. Trigger Asynchronous Background Tasks
-    # Drive uploads & Email dispatch
+    # Check if a dedicated external Redis broker is configured, otherwise use FastAPI's native BackgroundTasks
+    use_celery = False
+    if CELERY_AVAILABLE and settings.REDIS_URL and "localhost" not in settings.REDIS_URL and "127.0.0.1" not in settings.REDIS_URL:
+        use_celery = True
+
     for sub_file in created_files:
-        if CELERY_AVAILABLE:
+        if use_celery:
             try:
                 upload_file_to_gdrive_task.delay(submission.id, sub_file.id)
             except Exception:
@@ -298,11 +302,13 @@ def submit_assignment(
         else:
             background_tasks.add_task(execute_drive_transfer, submission.id, sub_file.id)
 
-    if CELERY_AVAILABLE:
+    if use_celery:
         try:
             send_submission_emails_task.delay(submission.id)
         except Exception:
-            pass
+            background_tasks.add_task(send_submission_emails_task, submission.id)
+    else:
+        background_tasks.add_task(send_submission_emails_task, submission.id)
 
     return build_receipt_response(submission)
 

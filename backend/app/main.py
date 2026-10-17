@@ -58,13 +58,14 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Note on checking table columns: {e}")
     logger.info("Database schemas verified.")
 
-    # 2. Ensure initial administrator exists
+    # 2. Ensure initial administrator exists and password stays synced
     db = SessionLocal()
     try:
-        admin_email = settings.FIRST_SUPERUSER_EMAIL.strip().lower()
+        admin_password = settings.ADMIN_PASSWORD.strip() if settings.ADMIN_PASSWORD else settings.FIRST_SUPERUSER_PASSWORD
+        admin_email = settings.ADMIN_USERNAME.strip().lower() if ("@" in settings.ADMIN_USERNAME) else settings.FIRST_SUPERUSER_EMAIL.strip().lower()
         existing_admin = db.query(Administrator).filter(Administrator.email == admin_email).first()
         if not existing_admin:
-            hashed_pwd = get_password_hash(settings.FIRST_SUPERUSER_PASSWORD)
+            hashed_pwd = get_password_hash(admin_password)
             super_admin = Administrator(
                 email=admin_email,
                 hashed_password=hashed_pwd,
@@ -75,6 +76,11 @@ async def lifespan(app: FastAPI):
             db.add(super_admin)
             db.commit()
             logger.info(f"Default Super Administrator created: {admin_email}")
+        else:
+            if admin_password:
+                existing_admin.hashed_password = get_password_hash(admin_password)
+                db.commit()
+                logger.info(f"Synchronized credentials for administrator: {admin_email}")
     except Exception as e:
         logger.error(f"Error seeding initial admin: {e}")
     finally:

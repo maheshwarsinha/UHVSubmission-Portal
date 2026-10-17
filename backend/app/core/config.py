@@ -122,8 +122,10 @@ class Settings(BaseSettings):
     EMAIL_FROM: str = "uhv.assignment.portal@gmail.com"
     TEACHER_EMAIL: str = "teacher.uhv@university.edu.in"
 
-    # Initial Superuser
+    # Initial Superuser / Admin Credentials
     FIRST_SUPERUSER_EMAIL: str = "admin@uhv-portal.edu.in"
     FIRST_SUPERUSER_PASSWORD: str = "AdminUHV@Pass2026!"
+    ADMIN_USERNAME: str = ""
+    ADMIN_PASSWORD: str = ""
 
 settings = Settings()
