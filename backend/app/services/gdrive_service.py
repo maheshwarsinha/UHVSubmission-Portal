@@ -331,7 +331,7 @@ class GDriveService:
 
     def clean_all_submissions(self) -> int:
         """
-        Deletes all files and subfolders inside the root Google Drive submission folder.
+        Deletes all files and subfolders recursively inside the root Google Drive submission folder.
         """
         if not self.service or not self.enabled:
             return 0
@@ -340,17 +340,21 @@ class GDriveService:
             if not root_id:
                 return 0
 
-            query = f"'{root_id}' in parents and trashed = false"
-            results = self.service.files().list(q=query, spaces="drive", fields="files(id, name)").execute()
+            results = self.service.files().list(
+                q="trashed = false",
+                spaces="drive",
+                fields="files(id, name, mimeType, parents)"
+            ).execute()
             files = results.get("files", [])
             deleted_count = 0
             for item in files:
-                try:
-                    self.service.files().delete(fileId=item["id"]).execute()
-                    deleted_count += 1
-                    logger.info(f"Deleted Drive item: {item['name']} ({item['id']})")
-                except Exception as del_err:
-                    logger.error(f"Failed to delete Drive item {item['id']}: {del_err}")
+                if item["id"] != root_id and item["name"] != settings.GDRIVE_ROOT_FOLDER_NAME:
+                    try:
+                        self.service.files().delete(fileId=item["id"]).execute()
+                        deleted_count += 1
+                        logger.info(f"Deleted Drive item: {item['name']} ({item['id']})")
+                    except Exception as del_err:
+                        logger.error(f"Failed to delete Drive item {item['id']}: {del_err}")
 
             self._folder_cache.clear()
             return deleted_count
