@@ -20,61 +20,80 @@ class EmailService:
         return dt.astimezone(ist_tz).strftime("%d %B %Y, %I:%M:%S %p %Z")
 
     @classmethod
-    def send_smtp_email(cls, recipient: str, subject: str, html_content: str, text_content: str) -> Tuple[bool, str]:
-        # 1. Option A: Brevo HTTP API (Port 443 - 300 emails/day free, sends to ANY recipient)
-        if getattr(settings, "BREVO_API_KEY", None):
-            try:
-                import httpx
-                headers = {
-                    "api-key": settings.BREVO_API_KEY,
-                    "Content-Type": "application/json"
-                }
-                sender_email = settings.EMAIL_FROM or settings.SMTP_USER or "maheshwarsinha01@gmail.com"
-                payload = {
-                    "sender": {"email": sender_email, "name": "UHV Assignment Portal"},
-                    "to": [{"email": recipient}],
-                    "subject": subject,
-                    "htmlContent": html_content,
-                    "textContent": text_content
-                }
-                res = httpx.post("https://api.brevo.com/v3/smtp/email", headers=headers, json=payload, timeout=15.0)
-                if res.status_code in (200, 201):
-                    msg_id = res.json().get("messageId", "BREVO_OK")
-                    logger.info(f"Email successfully delivered to {recipient} via Brevo HTTPS API (ID: {msg_id})")
-                    return True, f"BREVO_{msg_id}"
-                else:
-                    logger.warning(f"Brevo HTTP dispatch failed ({res.status_code}: {res.text}), checking fallbacks...")
-            except Exception as brevo_err:
-                logger.warning(f"Brevo HTTP API error: {brevo_err}, checking fallbacks...")
+    def send_smtp_email(
+        cls,
+        recipient: str,
+        subject: str,
+        html_content: str,
+        text_content: str,
+        prefer_provider: Optional[str] = None
+    ) -> Tuple[bool, str]:
+        def try_brevo() -> Optional[Tuple[bool, str]]:
+            if getattr(settings, "BREVO_API_KEY", None):
+                try:
+                    import httpx
+                    headers = {
+                        "api-key": settings.BREVO_API_KEY,
+                        "Content-Type": "application/json"
+                    }
+                    sender_email = settings.EMAIL_FROM or settings.SMTP_USER or "maheshwarsinha01@gmail.com"
+                    payload = {
+                        "sender": {"email": sender_email, "name": "UHV Assignment Portal"},
+                        "to": [{"email": recipient}],
+                        "subject": subject,
+                        "htmlContent": html_content,
+                        "textContent": text_content
+                    }
+                    res = httpx.post("https://api.brevo.com/v3/smtp/email", headers=headers, json=payload, timeout=15.0)
+                    if res.status_code in (200, 201):
+                        msg_id = res.json().get("messageId", "BREVO_OK")
+                        logger.info(f"Email successfully delivered to {recipient} via Brevo HTTPS API (ID: {msg_id})")
+                        return True, f"BREVO_{msg_id}"
+                    else:
+                        logger.warning(f"Brevo HTTP dispatch failed ({res.status_code}: {res.text}), checking fallbacks...")
+                except Exception as brevo_err:
+                    logger.warning(f"Brevo HTTP API error: {brevo_err}, checking fallbacks...")
+            return None
 
-        # 2. Option B: Resend HTTP API (Port 443 - Delivered to verified domain or teacher email)
-        if getattr(settings, "RESEND_API_KEY", None):
-            try:
-                import httpx
-                headers = {
-                    "Authorization": f"Bearer {settings.RESEND_API_KEY}",
-                    "Content-Type": "application/json"
-                }
-                from_addr = "UHV Portal <onboarding@resend.dev>"
-                if settings.EMAIL_FROM and "@gmail.com" not in settings.EMAIL_FROM:
-                    from_addr = f"UHV Portal <{settings.EMAIL_FROM}>"
+        def try_resend() -> Optional[Tuple[bool, str]]:
+            if getattr(settings, "RESEND_API_KEY", None):
+                try:
+                    import httpx
+                    headers = {
+                        "Authorization": f"Bearer {settings.RESEND_API_KEY}",
+                        "Content-Type": "application/json"
+                    }
+                    from_addr = "UHV Portal <onboarding@resend.dev>"
+                    if settings.EMAIL_FROM and "@gmail.com" not in settings.EMAIL_FROM:
+                        from_addr = f"UHV Portal <{settings.EMAIL_FROM}>"
 
-                payload = {
-                    "from": from_addr,
-                    "to": [recipient],
-                    "subject": subject,
-                    "html": html_content,
-                    "text": text_content
-                }
-                res = httpx.post("https://api.resend.com/emails", headers=headers, json=payload, timeout=15.0)
-                if res.status_code in (200, 201):
-                    msg_id = res.json().get("id", "RESEND_OK")
-                    logger.info(f"Email successfully delivered to {recipient} via Resend HTTPS API (ID: {msg_id})")
-                    return True, f"RESEND_{msg_id}"
-                else:
-                    logger.warning(f"Resend HTTP dispatch failed ({res.status_code}: {res.text}), checking fallbacks...")
-            except Exception as resend_err:
-                logger.warning(f"Resend HTTP API error: {resend_err}, checking fallbacks...")
+                    payload = {
+                        "from": from_addr,
+                        "to": [recipient],
+                        "subject": subject,
+                        "html": html_content,
+                        "text": text_content
+                    }
+                    res = httpx.post("https://api.resend.com/emails", headers=headers, json=payload, timeout=15.0)
+                    if res.status_code in (200, 201):
+                        msg_id = res.json().get("id", "RESEND_OK")
+                        logger.info(f"Email successfully delivered to {recipient} via Resend HTTPS API (ID: {msg_id})")
+                        return True, f"RESEND_{msg_id}"
+                    else:
+                        logger.warning(f"Resend HTTP dispatch failed ({res.status_code}: {res.text}), checking fallbacks...")
+                except Exception as resend_err:
+                    logger.warning(f"Resend HTTP API error: {resend_err}, checking fallbacks...")
+            return None
+
+        # Route preferred provider first:
+        # 'resend' for teacher alerts and admin tests
+        # 'brevo' (default) for student receipts
+        providers = [try_resend, try_brevo] if prefer_provider == "resend" else [try_brevo, try_resend]
+
+        for provider in providers:
+            result = provider()
+            if result is not None and result[0]:
+                return result
 
         # 3. Option C: Standard SMTP (Works locally on Windows/Linux with open ports)
         if not settings.SMTP_ENABLED or not settings.SMTP_USER or not settings.SMTP_PASSWORD:
@@ -179,7 +198,7 @@ Deadline Status: {deadline_classification}
 Files Received: {len(files_info)}
         """
 
-        return cls.send_smtp_email(student_email, subject, html_content, text_content)
+        return cls.send_smtp_email(student_email, subject, html_content, text_content, prefer_provider="brevo")
 
     @classmethod
     def send_teacher_notification(
@@ -211,6 +230,6 @@ Files Received: {len(files_info)}
         </div>
         """
         text_content = f"New UHV Submission: {student_name} ({roll_number}), Section {section}, Topic: {topic}, ID: {tracking_id}, Time: {ist_time}"
-        return cls.send_smtp_email(teacher_email, subject, html_content, text_content)
+        return cls.send_smtp_email(teacher_email, subject, html_content, text_content, prefer_provider="resend")
 
 email_service = EmailService()

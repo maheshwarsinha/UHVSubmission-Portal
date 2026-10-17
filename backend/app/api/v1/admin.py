@@ -82,10 +82,11 @@ def get_metrics(
     disk_total_gb = round(disk.total / (1024 ** 3), 2)
     disk_used_pct = round(disk.percent, 1)
 
-    # Email quota calculation (300/day limit)
+    # Student email quota calculation (300/day Brevo limit, teacher alerts routed via Resend)
     now_ist = datetime.now(ist_tz)
     start_of_today_utc = now_ist.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     sent_today = db.query(NotificationRecord).filter(
+        NotificationRecord.recipient_type == "STUDENT",
         NotificationRecord.delivery_status == "SENT",
         NotificationRecord.sent_at >= start_of_today_utc
     ).count()
@@ -723,7 +724,7 @@ def send_test_email(
     """
     text_content = f"UHV Portal Email Test. Sent at {email_service.get_ist_time_str()} by {current_admin.email}."
 
-    success, msg = email_service.send_smtp_email(recipient, subject, html_content, text_content)
+    success, msg = email_service.send_smtp_email(recipient, subject, html_content, text_content, prefer_provider="resend")
 
     log_audit(
         db,

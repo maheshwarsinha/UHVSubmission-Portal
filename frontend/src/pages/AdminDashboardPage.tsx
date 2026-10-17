@@ -668,7 +668,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-indigo-600 uppercase block">Email Quota</span>
+            <span className="text-[11px] font-bold text-indigo-600 uppercase block">Student Quota</span>
             {(metrics?.email_queued_count ?? 0) > 0 && (
               <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[9px] font-bold rounded">Queued</span>
             )}
@@ -680,7 +680,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
           <span className="text-[10px] text-slate-500 mt-1 block">
             {(metrics?.email_queued_count ?? 0) > 0
               ? `${metrics?.email_queued_count} queued for tomorrow`
-              : `${metrics?.email_remaining_today ?? 300} remaining today`}
+              : `${metrics?.email_remaining_today ?? 300} left (Brevo • Teacher via Resend)`}
           </span>
         </div>
 

@@ -37,12 +37,13 @@ def execute_email_dispatch(submission_id: str) -> dict:
             for f in submission.files
         ]
 
-        # Check daily email quota (300/day Brevo limit)
+        # Check daily student email quota (300/day Brevo free limit dedicated to students)
         ist_tz = pytz.timezone(settings.TIMEZONE)
         now_ist = datetime.now(ist_tz)
         start_of_today_utc = now_ist.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
 
         sent_today = db.query(NotificationRecord).filter(
+            NotificationRecord.recipient_type == "STUDENT",
             NotificationRecord.delivery_status == "SENT",
             NotificationRecord.sent_at >= start_of_today_utc
         ).count()
@@ -145,6 +146,7 @@ def dispatch_queued_notifications() -> dict:
         start_of_today_utc = now_ist.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
 
         sent_today = db.query(NotificationRecord).filter(
+            NotificationRecord.recipient_type == "STUDENT",
             NotificationRecord.delivery_status == "SENT",
             NotificationRecord.sent_at >= start_of_today_utc
         ).count()
