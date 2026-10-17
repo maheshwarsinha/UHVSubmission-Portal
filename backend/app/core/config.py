@@ -104,7 +104,7 @@ class Settings(BaseSettings):
     SUBMISSIONS_OPEN: bool = True
 
     # Google Drive API
-    GDRIVE_ENABLED: bool = False
+    GDRIVE_ENABLED: bool = True
     GDRIVE_CLIENT_ID: str = ""
     GDRIVE_CLIENT_SECRET: str = ""
     GDRIVE_REFRESH_TOKEN: str = ""
@@ -113,14 +113,14 @@ class Settings(BaseSettings):
     GDRIVE_MAX_CONCURRENT_UPLOADS: int = 4
 
     # Email
-    SMTP_ENABLED: bool = False
+    SMTP_ENABLED: bool = True
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_TLS: bool = True
     EMAIL_FROM: str = "maheshwarsinha01@gmail.com"
-    TEACHER_EMAIL: str = "maheshwarsinha01@gmail.com"
+    TEACHER_EMAIL: str = "maheshwarsinha7@gmail.com"
 
     # Initial Superuser / Admin Credentials
     FIRST_SUPERUSER_EMAIL: str = "admin@uhv-portal.edu.in"

@@ -291,7 +291,17 @@ class GDriveService:
                     logger.debug(f"Uploading {target_filename} to Drive: {int(status.progress() * 100)}%")
 
             drive_id = response.get("id")
-            web_link = response.get("webViewLink")
+            web_link = response.get("webViewLink") or f"https://drive.google.com/file/d/{drive_id}/view"
+            
+            # Make file viewable with link
+            try:
+                self.service.permissions().create(
+                    fileId=drive_id,
+                    body={"role": "reader", "type": "anyone"}
+                ).execute()
+            except Exception as perm_err:
+                logger.warning(f"Could not set public permission on {drive_id}: {perm_err}")
+
             logger.info(f"Successfully uploaded {target_filename} to Google Drive (ID: {drive_id}, Folder: {section}/{roll_number or ''})")
             return True, drive_id, web_link, "Successfully uploaded to Google Drive."
 

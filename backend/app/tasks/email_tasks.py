@@ -12,22 +12,16 @@ from app.services.email_service import email_service
 
 logger = logging.getLogger("email_tasks")
 
-def _task_wrapper(func):
-    if celery_app:
-        return celery_app.task(bind=True, max_retries=3, default_retry_delay=30)(func)
-    return func
-
-@_task_wrapper
-def send_submission_emails_task(self_or_sub_id, submission_id=None):
+def execute_email_dispatch(submission_id: str) -> dict:
     """
-    Asynchronously delivers student confirmation receipt and teacher alert emails.
+    Direct asynchronous email delivery function for FastAPI BackgroundTasks.
+    Runs reliably in background without requiring Celery or Redis.
     """
-    actual_sub_id = submission_id if submission_id is not None else self_or_sub_id
     db = SessionLocal()
     try:
-        submission = db.query(Submission).filter(Submission.id == actual_sub_id).first()
+        submission = db.query(Submission).filter(Submission.id == submission_id).first()
         if not submission:
-            logger.error(f"Submission {actual_sub_id} not found for email task.")
+            logger.error(f"Submission {submission_id} not found for email task.")
             return {"status": "error", "message": "Submission not found"}
 
         student = submission.student
@@ -72,7 +66,7 @@ def send_submission_emails_task(self_or_sub_id, submission_id=None):
         db.commit()
 
         # 2. Deliver Teacher Email if configured
-        teacher_email = settings.TEACHER_EMAIL
+        teacher_email = settings.TEACHER_EMAIL or settings.EMAIL_FROM
         if teacher_email:
             teacher_notif = NotificationRecord(
                 submission_id=submission.id,
@@ -100,13 +94,23 @@ def send_submission_emails_task(self_or_sub_id, submission_id=None):
             teacher_notif.sent_at = datetime.now(timezone.utc) if t_success else None
             db.commit()
 
-        logger.info(f"Email tasks processed for submission {submission_id}")
+        logger.info(f"Email tasks processed successfully for submission {submission_id}")
         return {"status": "completed", "student_email_sent": s_success}
-
     except Exception as exc:
-        logger.error(f"Email delivery task exception for {submission_id}: {exc}")
-        if self.request.retries >= self.max_retries:
-            logger.error("Max retries reached for email dispatch.")
-        raise self.retry(exc=exc, countdown=30)
+        logger.error(f"Error in execute_email_dispatch for {submission_id}: {exc}")
+        return {"status": "error", "message": str(exc)}
     finally:
         db.close()
+
+def _task_wrapper(func):
+    if celery_app:
+        return celery_app.task(bind=True, max_retries=3, default_retry_delay=30)(func)
+    return func
+
+@_task_wrapper
+def send_submission_emails_task(self_or_sub_id, submission_id=None):
+    """
+    Celery task wrapper delegating to execute_email_dispatch.
+    """
+    actual_sub_id = submission_id if submission_id is not None else self_or_sub_id
+    return execute_email_dispatch(actual_sub_id)

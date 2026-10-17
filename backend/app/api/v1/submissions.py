@@ -18,6 +18,7 @@ from app.services.upload_service import UploadService
 from app.services.email_service import EmailService
 
 from app.tasks.drive_tasks import execute_drive_transfer
+from app.tasks.email_tasks import execute_email_dispatch
 from app.services.gdrive_link_service import gdrive_link_service
 
 # Task triggers (Celery with fallback)
@@ -306,9 +307,9 @@ def submit_assignment(
         try:
             send_submission_emails_task.delay(submission.id)
         except Exception:
-            background_tasks.add_task(send_submission_emails_task, submission.id)
+            background_tasks.add_task(execute_email_dispatch, submission.id)
     else:
-        background_tasks.add_task(send_submission_emails_task, submission.id)
+        background_tasks.add_task(execute_email_dispatch, submission.id)
 
     return build_receipt_response(submission)
 

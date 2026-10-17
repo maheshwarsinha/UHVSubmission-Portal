@@ -547,6 +547,22 @@ class GDriveLinkService:
         Downloads a public Google Drive file into dest_path.
         Handles large-file virus-scan confirmation pages.
         """
+        # 1. Try using official Google Drive API client if available
+        if gdrive_service.service and gdrive_service.enabled:
+            try:
+                from googleapiclient.http import MediaIoBaseDownload
+                request = gdrive_service.service.files().get_media(fileId=file_id)
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                with open(dest_path, "wb") as fh:
+                    downloader = MediaIoBaseDownload(fh, request, chunksize=5 * 1024 * 1024)
+                    done = False
+                    while not done:
+                        status, done = downloader.next_chunk()
+                if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
+                    return True, "Downloaded via Drive API successfully."
+            except Exception as api_err:
+                logger.warning(f"Drive API get_media failed ({api_err}), falling back to web download...")
+
         url = "https://drive.google.com/uc?export=download"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -602,11 +618,51 @@ class GDriveLinkService:
         mime_type: str = "application/octet-stream"
     ) -> Tuple[bool, Optional[str], Optional[str], str]:
         """
-        Downloads a student's public Drive file into a transient temporary buffer,
-        uploads it to Admin's Google Drive inside section/roll_number,
-        and IMMEDIATELY deletes the local temporary file so local storage is not consumed.
+        Transfers a student's shared Drive file to Admin's Google Drive inside section/roll_number.
+        First tries instant cloud-to-cloud copy via Google Drive API.
+        Falls back to transient streaming download and upload if direct copy is restricted.
         Returns: (success, admin_drive_id, admin_web_link, message)
         """
+        # 1. Attempt instant cloud-to-cloud copy via Google Drive API
+        if gdrive_service.service and gdrive_service.enabled:
+            try:
+                root_id = gdrive_service.get_or_create_folder(settings.GDRIVE_ROOT_FOLDER_NAME)
+                section_id = gdrive_service.get_or_create_folder(section, parent_folder_id=root_id) if root_id else None
+                parent_id = section_id
+                if roll_number and section_id:
+                    roll_folder_id = gdrive_service.get_or_create_folder(roll_number, parent_folder_id=section_id)
+                    if roll_folder_id:
+                        parent_id = roll_folder_id
+
+                if parent_id:
+                    copy_body = {
+                        "name": expected_filename,
+                        "parents": [parent_id]
+                    }
+                    copied_file = gdrive_service.service.files().copy(
+                        fileId=source_file_id,
+                        body=copy_body,
+                        fields="id, webViewLink"
+                    ).execute()
+                    
+                    drive_id = copied_file.get("id")
+                    web_link = copied_file.get("webViewLink") or f"https://drive.google.com/file/d/{drive_id}/view"
+                    
+                    # Ensure public link access
+                    try:
+                        gdrive_service.service.permissions().create(
+                            fileId=drive_id,
+                            body={"role": "reader", "type": "anyone"}
+                        ).execute()
+                    except Exception:
+                        pass
+                    
+                    logger.info(f"Direct Drive API copy succeeded for {expected_filename} (ID: {drive_id})")
+                    return True, drive_id, web_link, "Directly copied to Admin Drive."
+            except Exception as copy_err:
+                logger.warning(f"Direct Drive copy failed for {source_file_id} ({copy_err}), falling back to transient download...")
+
+        # 2. Fallback: Download to transient local file and upload
         from app.services.upload_service import UploadService
         temp_dir = os.path.join(UploadService.get_upload_dir(), "temp_transfers")
         os.makedirs(temp_dir, exist_ok=True)
