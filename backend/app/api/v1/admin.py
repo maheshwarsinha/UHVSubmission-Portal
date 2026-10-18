@@ -18,9 +18,10 @@ from app.models import (
 )
 
 logger = logging.getLogger("admin_api")
-from app.schemas.admin import MetricsSummaryResponse
+from app.schemas.admin import MetricsSummaryResponse, ResetDataRequest
 from app.schemas.system import SystemSettingsUpdate
 from app.services.upload_service import UploadService
+from app.core.security import verify_password
 
 # Tasks for retry
 from app.tasks.drive_tasks import execute_drive_transfer
@@ -898,13 +899,22 @@ def trigger_dispatch_queued_emails(
     return res
 
 @router.delete("/reset-all-data")
+@router.post("/reset-all-data")
 def reset_all_portal_data(
+    payload: ResetDataRequest,
     db: Session = Depends(get_db),
     current_admin: Administrator = Depends(get_current_admin)
 ):
     """
     Clears all submissions, files, jobs, and notifications from the portal and Google Drive to start completely from zero.
+    Requires verified administrator password to ensure zero accidental data loss in production.
     """
+    if not payload.password or not verify_password(payload.password, current_admin.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect administrator password! Portal reset has been rejected to protect production submissions."
+        )
+
     import shutil
     from app.services.gdrive_service import gdrive_service
 

@@ -112,8 +112,8 @@ export const apiService = {
   },
 
   // Admin API
-  async resetAllData(): Promise<{ success: boolean; message: string; drive_items_deleted: number }> {
-    const res = await api.delete('/admin/reset-all-data');
+  async resetAllData(password: string): Promise<{ success: boolean; message: string; drive_items_deleted: number }> {
+    const res = await api.post('/admin/reset-all-data', { password });
     return res.data;
   },
 

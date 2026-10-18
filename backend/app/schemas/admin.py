@@ -54,3 +54,7 @@ class MetricsSummaryResponse(BaseModel):
     email_daily_limit: Optional[int] = 300
     email_remaining_today: Optional[int] = 300
     email_queued_count: Optional[int] = 0
+
+class ResetDataRequest(BaseModel):
+    password: str
+
