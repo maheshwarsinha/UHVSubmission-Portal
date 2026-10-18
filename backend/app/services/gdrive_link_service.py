@@ -578,36 +578,49 @@ class GDriveLinkService:
 
         try:
             with httpx.Client(follow_redirects=True, timeout=900.0, headers=headers) as client:
-                res = client.get(url, params={"id": file_id})
-                
-                # Check for confirm token (used for files > 100MB by Google)
-                confirm_token = None
-                for key, val in res.cookies.items():
-                    if key.startswith("download_warning"):
-                        confirm_token = val
-                        break
+                # 1. Open initial stream without loading full response into memory
+                with client.stream("GET", url, params={"id": file_id}) as resp:
+                    if resp.status_code != 200:
+                        return False, f"Failed to connect to Drive. HTTP status: {resp.status_code}"
 
-                if not confirm_token:
-                    # Look in HTML body for confirm parameter
-                    match = re.search(r"confirm=([0-9A-Za-z_]+)", res.text)
-                    if match:
-                        confirm_token = match.group(1)
+                    content_type = resp.headers.get("content-type", "").lower()
 
-                params = {"id": file_id}
-                if confirm_token:
-                    params["confirm"] = confirm_token
+                    # Check if Google returned an HTML warning (e.g. virus scan page for files > 100MB)
+                    if "text/html" in content_type:
+                        html_body = resp.read().decode("utf-8", errors="ignore")
+                        confirm_token = None
+                        for key, val in resp.cookies.items():
+                            if key.startswith("download_warning"):
+                                confirm_token = val
+                                break
 
-                # Perform streaming download
-                with client.stream("GET", url, params=params) as stream_resp:
-                    if stream_resp.status_code != 200:
-                        return False, f"Failed to download from Drive. HTTP status: {stream_resp.status_code}"
+                        if not confirm_token:
+                            match = re.search(r"confirm=([0-9A-Za-z_]+)", html_body)
+                            if match:
+                                confirm_token = match.group(1)
 
-                    if dest_dir:
-                        os.makedirs(dest_dir, exist_ok=True)
-                    with open(dest_path, "wb") as f:
-                        for chunk in stream_resp.iter_bytes(chunk_size=1024 * 1024):
-                            if chunk:
-                                f.write(chunk)
+                        if not confirm_token:
+                            confirm_token = "t"
+
+                        # Perform confirmed streaming download straight to disk
+                        with client.stream("GET", url, params={"id": file_id, "confirm": confirm_token}) as confirmed_resp:
+                            if confirmed_resp.status_code != 200:
+                                return False, f"Failed to stream from Drive after confirmation. HTTP status: {confirmed_resp.status_code}"
+
+                            if dest_dir:
+                                os.makedirs(dest_dir, exist_ok=True)
+                            with open(dest_path, "wb") as f:
+                                for chunk in confirmed_resp.iter_bytes(chunk_size=4 * 1024 * 1024):
+                                    if chunk:
+                                        f.write(chunk)
+                    else:
+                        # Direct streaming to disk (4MB chunks, zero RAM buffering!)
+                        if dest_dir:
+                            os.makedirs(dest_dir, exist_ok=True)
+                        with open(dest_path, "wb") as f:
+                            for chunk in resp.iter_bytes(chunk_size=4 * 1024 * 1024):
+                                if chunk:
+                                    f.write(chunk)
 
             if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
                 return True, "Download completed successfully."

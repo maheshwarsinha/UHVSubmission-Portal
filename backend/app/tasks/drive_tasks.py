@@ -162,6 +162,9 @@ def execute_drive_transfer(submission_id: str, file_id: str) -> dict:
         if not sub_file or not submission:
             return {"status": "error", "message": "Record not found"}
 
+        if sub_file.upload_status == "DRIVE_COMPLETED" and sub_file.drive_file_id:
+            return {"status": "completed", "drive_id": sub_file.drive_file_id, "web_link": sub_file.admin_drive_url}
+
         sub_file.upload_status = "TRANSFERRING"
         db.commit()
 

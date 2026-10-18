@@ -4,8 +4,9 @@ import csv
 from datetime import datetime, timezone
 import pytz
 import psutil
-from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import logging
+from typing import Optional, List, Dict, Any, Tuple
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -15,6 +16,8 @@ from app.models import (
     Administrator, Submission, Student, SubmissionFile,
     BackgroundJob, NotificationRecord, SystemSetting, AuditLog
 )
+
+logger = logging.getLogger("admin_api")
 from app.schemas.admin import MetricsSummaryResponse
 from app.schemas.system import SystemSettingsUpdate
 from app.services.upload_service import UploadService
@@ -40,6 +43,107 @@ def log_audit(db: Session, admin_id: str, action: str, resource_type: str = None
     )
     db.add(audit)
     db.commit()
+
+_brevo_quota_cache = {
+    "last_checked": 0.0,
+    "sent_today": 0,
+    "daily_limit": 300,
+    "remaining_today": 300
+}
+
+def get_brevo_quota_metrics(db: Session, now_ist: datetime) -> Dict[str, Any]:
+    """
+    Connects to Brevo's live account API (cached for 60 seconds) to display real-time
+    remaining email credits. Falls back cleanly to local database counts if offline.
+    """
+    global _brevo_quota_cache
+    current_ts = datetime.now().timestamp()
+    if current_ts - _brevo_quota_cache["last_checked"] < 60.0:
+        return _brevo_quota_cache
+
+    if getattr(settings, "BREVO_API_KEY", None):
+        try:
+            import httpx
+            headers = {"api-key": settings.BREVO_API_KEY}
+            res = httpx.get("https://api.brevo.com/v3/account", headers=headers, timeout=3.5)
+            if res.status_code == 200:
+                data = res.json()
+                plans = data.get("plan", [])
+                for p in plans:
+                    if p.get("creditsType") == "sendLimit":
+                        rem = int(p.get("credits", 300))
+                        limit = 300
+                        sent = max(0, limit - rem)
+                        _brevo_quota_cache = {
+                            "last_checked": current_ts,
+                            "sent_today": sent,
+                            "daily_limit": limit,
+                            "remaining_today": rem
+                        }
+                        return _brevo_quota_cache
+        except Exception as e:
+            logger.warning(f"Could not fetch live Brevo quota ({e}), using DB count")
+
+    # Fallback: Count from database records
+    start_of_today_utc = now_ist.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    db_sent = db.query(NotificationRecord).filter(
+        NotificationRecord.recipient_type == "STUDENT",
+        NotificationRecord.delivery_status == "SENT",
+        NotificationRecord.sent_at >= start_of_today_utc
+    ).count()
+    limit = 300
+    rem = max(0, limit - db_sent)
+    _brevo_quota_cache = {
+        "last_checked": current_ts,
+        "sent_today": db_sent,
+        "daily_limit": limit,
+        "remaining_today": rem
+    }
+    return _brevo_quota_cache
+
+def reconcile_submission_drive_files(submission: Submission, db: Session) -> bool:
+    """
+    Checks Google Drive for any unlinked files belonging to this submission.
+    If a file with expected_filename already exists with size > 0 in Admin Drive,
+    links it immediately and updates upload_status to DRIVE_COMPLETED.
+    """
+    from app.services.gdrive_service import gdrive_service
+    if not (gdrive_service.service and gdrive_service.enabled):
+        return False
+
+    updated = False
+    for sub_file in submission.files:
+        if sub_file.upload_status != "DRIVE_COMPLETED":
+            try:
+                # Query Admin Google Drive for expected filename
+                q = f"name = '{sub_file.expected_filename}' and trashed = false"
+                res = gdrive_service.service.files().list(
+                    q=q,
+                    spaces="drive",
+                    fields="files(id, webViewLink, size)"
+                ).execute()
+                files = [f for f in res.get("files", []) if int(f.get("size", 0)) > 0]
+                if files:
+                    drive_id = files[0]["id"]
+                    web_link = files[0].get("webViewLink") or f"https://drive.google.com/file/d/{drive_id}/view"
+                    sub_file.drive_file_id = drive_id
+                    sub_file.admin_drive_url = web_link
+                    sub_file.upload_status = "DRIVE_COMPLETED"
+                    sub_file.verification_status = True
+                    sub_file.error_message = None
+                    updated = True
+                    logger.info(f"Reconciled and linked {sub_file.expected_filename} to Drive ID: {drive_id}")
+            except Exception as e:
+                logger.warning(f"Error checking drive reconciliation for {sub_file.expected_filename}: {e}")
+
+    if updated:
+        all_done = all(f.upload_status == "DRIVE_COMPLETED" for f in submission.files)
+        if all_done:
+            submission.status = "COMPLETED"
+            submission.drive_completed_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(submission)
+    return updated
 
 @router.get("/metrics", response_model=MetricsSummaryResponse)
 def get_metrics(
@@ -82,21 +186,16 @@ def get_metrics(
     disk_total_gb = round(disk.total / (1024 ** 3), 2)
     disk_used_pct = round(disk.percent, 1)
 
-    # Student email quota calculation (300/day Brevo limit, teacher alerts routed via Resend)
+    # Student email quota calculation (Live Brevo Account API sync with DB fallback)
     now_ist = datetime.now(ist_tz)
-    start_of_today_utc = now_ist.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
-    sent_today = db.query(NotificationRecord).filter(
-        NotificationRecord.recipient_type == "STUDENT",
-        NotificationRecord.delivery_status == "SENT",
-        NotificationRecord.sent_at >= start_of_today_utc
-    ).count()
+    quota_metrics = get_brevo_quota_metrics(db, now_ist)
+    sent_today = quota_metrics["sent_today"]
+    daily_limit = quota_metrics["daily_limit"]
+    remaining_today = quota_metrics["remaining_today"]
 
     queued_count = db.query(NotificationRecord).filter(
         NotificationRecord.delivery_status == "QUEUED_DAILY_LIMIT"
     ).count()
-
-    daily_limit = 300
-    remaining_today = max(0, daily_limit - sent_today)
 
     return MetricsSummaryResponse(
         total_submissions=total,
@@ -241,6 +340,9 @@ def get_submission_detail(
     submission = db.query(Submission).filter(Submission.id == submission_id).first()
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
+
+    # Auto-reconcile with Google Drive if any files are pending but already uploaded
+    reconcile_submission_drive_files(submission, db)
 
     ist_tz = pytz.timezone(settings.TIMEZONE)
     server_time_ist = submission.server_received_at.astimezone(ist_tz).strftime("%d %B %Y, %I:%M:%S %p IST")
@@ -636,36 +738,40 @@ def export_submissions_excel(
 @router.post("/submissions/{submission_id}/upload-drive")
 def trigger_submission_drive_upload(
     submission_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_admin: Administrator = Depends(get_current_admin)
 ):
     """
-    Directly triggers or forces Google Drive upload / transfer for a given submission.
+    Triggers Google Drive transfer asynchronously with background status updates.
+    Performs instant reconciliation for any files already archived in Google Drive.
     """
     submission = db.query(Submission).filter(Submission.id == submission_id).first()
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
 
-    uploaded_count = 0
-    errors = []
+    # 1. Instant reconciliation: check if any files are already present in Google Drive
+    reconcile_submission_drive_files(submission, db)
 
-    for sub_file in submission.files:
-        if sub_file.upload_status != "DRIVE_COMPLETED":
-            sub_file.upload_status = "TRANSFERRING"
-            db.commit()
+    # 2. Identify remaining uncompleted files
+    pending_files = [f for f in submission.files if f.upload_status != "DRIVE_COMPLETED"]
+    queued_count = 0
 
-            res = execute_drive_transfer(submission.id, sub_file.id)
-            if res.get("status") == "completed":
-                uploaded_count += 1
-            else:
-                errors.append(f"{sub_file.file_type}: {res.get('message', 'Transfer error')}")
+    for sub_file in pending_files:
+        sub_file.upload_status = "TRANSFERRING"
+        db.commit()
+        # Enqueue background task (safe from HTTP timeouts)
+        background_tasks.add_task(execute_drive_transfer, submission.id, sub_file.id)
+        queued_count += 1
 
-    # If all files completed
     all_done = all(f.upload_status == "DRIVE_COMPLETED" for f in submission.files)
     if all_done:
         submission.status = "COMPLETED"
         submission.drive_completed_at = datetime.now(timezone.utc)
         db.commit()
+        msg = "All files successfully archived in Google Drive!"
+    else:
+        msg = f"Transfer running in background ({queued_count} files queued)."
 
     log_audit(
         db,
@@ -673,13 +779,14 @@ def trigger_submission_drive_upload(
         action="FORCE_DRIVE_UPLOAD",
         resource_type="Submission",
         resource_id=submission_id,
-        details={"uploaded": uploaded_count, "errors": errors}
+        details={"queued": queued_count, "all_completed": all_done}
     )
 
     return {
-        "success": len(errors) == 0,
-        "uploaded_files": uploaded_count,
-        "errors": errors,
+        "success": True,
+        "message": msg,
+        "queued_files": queued_count,
+        "all_completed": all_done,
         "submission_status": submission.status
     }
 
@@ -687,14 +794,38 @@ def trigger_submission_drive_upload(
 def transfer_single_submission_file(
     submission_id: str,
     file_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_admin: Administrator = Depends(get_current_admin)
 ):
     """
     Admin endpoint to trigger transfer of a single submission file into the Admin Google Drive.
+    Reconciles with existing Google Drive files first, or runs transfer in background.
     """
-    res = execute_drive_transfer(submission_id, file_id)
-    return res
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    reconcile_submission_drive_files(submission, db)
+    sub_file = db.query(SubmissionFile).filter(SubmissionFile.id == file_id).first()
+    if not sub_file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if sub_file.upload_status == "DRIVE_COMPLETED":
+        return {
+            "status": "completed",
+            "drive_id": sub_file.drive_file_id,
+            "web_link": sub_file.admin_drive_url,
+            "message": "File verified and linked in Google Drive."
+        }
+
+    sub_file.upload_status = "TRANSFERRING"
+    db.commit()
+    background_tasks.add_task(execute_drive_transfer, submission_id, file_id)
+    return {
+        "status": "processing",
+        "message": "File transfer running in background."
+    }
 
 @router.post("/test-email")
 def send_test_email(

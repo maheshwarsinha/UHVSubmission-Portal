@@ -19,12 +19,14 @@ class GDriveService:
         self.enabled = settings.GDRIVE_ENABLED and bool(settings.GDRIVE_REFRESH_TOKEN)
         self.service = None
         self._folder_cache: Dict[str, str] = {}
-        self.redis_client = None
-        if redis:
+        if redis and getattr(settings, "REDIS_URL", None):
             try:
-                self.redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+                test_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True, socket_connect_timeout=1.0)
+                test_client.ping()
+                self.redis_client = test_client
             except Exception as re_err:
-                logger.warning(f"Could not connect to Redis for GDrive cache/locks: {re_err}")
+                logger.info(f"Redis not available for distributed locks ({re_err}). Falling back to memory cache.")
+                self.redis_client = None
 
         if self.enabled:
             self._init_service()
@@ -282,7 +284,7 @@ class GDriveService:
                 local_file_path,
                 mimetype=mime_type,
                 resumable=True,
-                chunksize=1024 * 1024  # 1MB chunks to prevent read timeouts on cloud hosts
+                chunksize=16 * 1024 * 1024  # 16MB chunks for lightning fast cloud uploads
             )
 
             request = self.service.files().create(

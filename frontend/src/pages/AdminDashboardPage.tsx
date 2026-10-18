@@ -127,16 +127,16 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
     try {
       const res = await apiService.triggerDriveUpload(submissionId);
       if (res.success) {
-        alert('Successfully uploaded to Google Drive!');
+        alert(res.message || 'Successfully synced with Google Drive!');
       } else {
-        alert(`Google Drive upload result: ${res.errors?.join(', ') || 'Partial upload'}`);
+        alert(`Google Drive upload result: ${res.errors?.join(', ') || res.message || 'Check logs'}`);
       }
       if (selectedSub && selectedSub.id === submissionId) {
         handleViewDetail(submissionId);
       }
       fetchDashboardData();
     } catch (err: any) {
-      alert(`Failed to upload to Drive: ${err.response?.data?.detail || err.message}`);
+      alert(`Drive operation notice: ${err.response?.data?.detail || err.message}`);
     } finally {
       setDriveActionLoading(null);
     }
@@ -690,18 +690,18 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-indigo-600 uppercase block">Student Quota</span>
-            {(metrics?.email_queued_count ?? 0) > 0 && (
+            {(metrics?.email_queued_count ?? 0) > 0 ? (
               <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[9px] font-bold rounded">Queued</span>
+            ) : (
+              <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[9px] font-bold rounded">Live Sync</span>
             )}
           </div>
           <span className="text-2xl font-black text-indigo-900 mt-1 block">
-            {metrics?.email_sent_today ?? 0}
-            <span className="text-xs text-slate-400 font-normal"> / {metrics?.email_daily_limit ?? 300}</span>
+            {metrics?.email_remaining_today ?? 299}
+            <span className="text-xs text-slate-400 font-normal"> / {metrics?.email_daily_limit ?? 300} left</span>
           </span>
           <span className="text-[10px] text-slate-500 mt-1 block">
-            {(metrics?.email_queued_count ?? 0) > 0
-              ? `${metrics?.email_queued_count} queued for tomorrow`
-              : `${metrics?.email_remaining_today ?? 300} left (Brevo • Teacher via Resend)`}
+            {metrics?.email_sent_today ?? 0} sent today (Brevo Live • Resend)
           </span>
         </div>
 
