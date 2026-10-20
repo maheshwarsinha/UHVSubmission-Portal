@@ -755,15 +755,13 @@ def trigger_submission_drive_upload(
     reconcile_submission_drive_files(submission, db)
 
     # 2. Identify remaining uncompleted files
+    from app.services.drive_queue import drive_queue
     pending_files = [f for f in submission.files if f.upload_status != "DRIVE_COMPLETED"]
     queued_count = 0
 
     for sub_file in pending_files:
-        sub_file.upload_status = "TRANSFERRING"
-        db.commit()
-        # Enqueue background task (safe from HTTP timeouts)
-        background_tasks.add_task(execute_drive_transfer, submission.id, sub_file.id)
-        queued_count += 1
+        if drive_queue.enqueue(submission.id, sub_file.id):
+            queued_count += 1
 
     all_done = all(f.upload_status == "DRIVE_COMPLETED" for f in submission.files)
     if all_done:
@@ -772,7 +770,7 @@ def trigger_submission_drive_upload(
         db.commit()
         msg = "All files successfully archived in Google Drive!"
     else:
-        msg = f"Transfer running in background ({queued_count} files queued)."
+        msg = f"Transfer running in background ({queued_count} files queued in serial queue)."
 
     log_audit(
         db,
@@ -801,7 +799,7 @@ def transfer_single_submission_file(
 ):
     """
     Admin endpoint to trigger transfer of a single submission file into the Admin Google Drive.
-    Reconciles with existing Google Drive files first, or runs transfer in background.
+    Enqueues in the serial DriveTransferQueue to prevent concurrent server overloads.
     """
     submission = db.query(Submission).filter(Submission.id == submission_id).first()
     if not submission:
@@ -820,12 +818,11 @@ def transfer_single_submission_file(
             "message": "File verified and linked in Google Drive."
         }
 
-    sub_file.upload_status = "TRANSFERRING"
-    db.commit()
-    background_tasks.add_task(execute_drive_transfer, submission_id, file_id)
+    from app.services.drive_queue import drive_queue
+    drive_queue.enqueue(submission_id, file_id)
     return {
         "status": "processing",
-        "message": "File transfer running in background."
+        "message": "File transfer added to serial queue."
     }
 
 @router.post("/test-email")
@@ -1007,3 +1004,102 @@ def update_system_settings(
     )
 
     return {"success": True, "message": "System configuration updated successfully."}
+
+from pydantic import BaseModel
+
+class GDriveTokenUpdate(BaseModel):
+    refresh_token: str
+
+@router.get("/gdrive/status")
+def get_gdrive_status(
+    db: Session = Depends(get_db),
+    current_admin: Administrator = Depends(get_current_admin)
+):
+    from app.services.gdrive_service import gdrive_service
+    from app.services.drive_queue import drive_queue
+
+    active_token = gdrive_service.get_active_refresh_token()
+    is_valid, msg = gdrive_service.reconnect() if active_token else (False, "No refresh token configured")
+    
+    pending_count = db.query(SubmissionFile).filter(SubmissionFile.upload_status != "DRIVE_COMPLETED").count()
+    masked_token = (active_token[:8] + "..." + active_token[-6:]) if len(active_token) > 14 else ("Configured" if active_token else "Not Set")
+
+    return {
+        "connected": is_valid,
+        "message": msg,
+        "has_token": bool(active_token),
+        "masked_token": masked_token,
+        "pending_files_count": pending_count,
+        "queue_status": drive_queue.get_status()
+    }
+
+@router.post("/gdrive/update-token")
+def update_gdrive_token(
+    payload: GDriveTokenUpdate,
+    db: Session = Depends(get_db),
+    current_admin: Administrator = Depends(get_current_admin)
+):
+    token = payload.refresh_token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Refresh token cannot be empty")
+
+    from app.services.gdrive_service import gdrive_service
+    from app.services.drive_queue import drive_queue
+
+    is_valid, msg = gdrive_service.reconnect(token)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Google Drive verification failed: {msg}")
+
+    # Save to SystemSetting in DB
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "gdrive_refresh_token").first()
+    if not setting:
+        setting = SystemSetting(key="gdrive_refresh_token", value=token, description="Admin Google Drive OAuth Refresh Token")
+        db.add(setting)
+    else:
+        setting.value = token
+    db.commit()
+
+    # Re-initialize service
+    gdrive_service._init_service(token)
+
+    # Automatically enqueue all pending/failed files
+    pending_files = db.query(SubmissionFile).filter(SubmissionFile.upload_status != "DRIVE_COMPLETED").all()
+    queued_count = 0
+    for pf in pending_files:
+        if drive_queue.enqueue(pf.submission_id, pf.id):
+            queued_count += 1
+
+    log_audit(
+        db,
+        admin_id=current_admin.id,
+        action="GDRIVE_TOKEN_UPDATED",
+        details={"queued_files": queued_count}
+    )
+
+    return {
+        "success": True,
+        "message": f"Google Drive connected successfully! {queued_count} pending files queued for background transfer.",
+        "queued_files": queued_count
+    }
+
+@router.post("/gdrive/sync-all-pending")
+def sync_all_pending_drive_files(
+    db: Session = Depends(get_db),
+    current_admin: Administrator = Depends(get_current_admin)
+):
+    """
+    Enqueues all pending/failed files across all submissions into the serial DriveTransferQueue.
+    """
+    from app.services.drive_queue import drive_queue
+
+    pending_files = db.query(SubmissionFile).filter(SubmissionFile.upload_status != "DRIVE_COMPLETED").all()
+    queued_count = 0
+    for pf in pending_files:
+        if drive_queue.enqueue(pf.submission_id, pf.id):
+            queued_count += 1
+
+    return {
+        "success": True,
+        "message": f"{queued_count} files added to serial Google Drive transfer queue.",
+        "queued_files": queued_count
+    }

@@ -588,22 +588,33 @@ class GDriveLinkService:
                     # Check if Google returned an HTML warning (e.g. virus scan page for files > 100MB)
                     if "text/html" in content_type:
                         html_body = resp.read().decode("utf-8", errors="ignore")
-                        confirm_token = None
-                        for key, val in resp.cookies.items():
-                            if key.startswith("download_warning"):
-                                confirm_token = val
-                                break
+                        # 1. Parse form action and hidden input fields (Google Drive modern virus warning form)
+                        action_match = re.search(r'action="([^"]+)"', html_body)
+                        action_url = action_match.group(1) if action_match else "https://drive.usercontent.google.com/download"
+                        input_fields = re.findall(r'<input[^>]+name="([^"]+)"[^>]+value="([^"]*)"', html_body, re.IGNORECASE)
+                        if not input_fields:
+                            input_fields = re.findall(r'<input[^>]+value="([^"]*)"[^>]+name="([^"]+)"', html_body, re.IGNORECASE)
+                            input_fields = [(k, v) for v, k in input_fields]
 
-                        if not confirm_token:
-                            match = re.search(r"confirm=([0-9A-Za-z_]+)", html_body)
-                            if match:
-                                confirm_token = match.group(1)
-
-                        if not confirm_token:
-                            confirm_token = "t"
+                        params = {k: v for k, v in input_fields}
+                        if "id" not in params:
+                            params["id"] = file_id
+                        if "export" not in params:
+                            params["export"] = "download"
+                        if "confirm" not in params:
+                            confirm_token = None
+                            for key, val in resp.cookies.items():
+                                if key.startswith("download_warning"):
+                                    confirm_token = val
+                                    break
+                            if not confirm_token:
+                                match = re.search(r"confirm=([0-9A-Za-z_]+)", html_body)
+                                if match:
+                                    confirm_token = match.group(1)
+                            params["confirm"] = confirm_token or "t"
 
                         # Perform confirmed streaming download straight to disk
-                        with client.stream("GET", url, params={"id": file_id, "confirm": confirm_token}) as confirmed_resp:
+                        with client.stream("GET", action_url, params=params) as confirmed_resp:
                             if confirmed_resp.status_code != 200:
                                 return False, f"Failed to stream from Drive after confirmation. HTTP status: {confirmed_resp.status_code}"
 

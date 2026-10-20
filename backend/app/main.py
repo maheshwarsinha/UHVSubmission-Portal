@@ -107,6 +107,24 @@ async def lifespan(app: FastAPI):
 
     watchdog_task = asyncio.create_task(_queue_watchdog())
 
+    # 5. Drive transfer queue recovery on startup
+    try:
+        from app.services.drive_queue import drive_queue
+        from app.models import SubmissionFile
+        rec_db = SessionLocal()
+        try:
+            interrupted_files = rec_db.query(SubmissionFile).filter(
+                SubmissionFile.upload_status.in_(["TRANSFER_QUEUED", "TRANSFERRING"])
+            ).all()
+            for pf in interrupted_files:
+                drive_queue.enqueue(pf.submission_id, pf.id)
+            if interrupted_files:
+                logger.info(f"Drive queue recovered {len(interrupted_files)} pending files on startup.")
+        finally:
+            rec_db.close()
+    except Exception as q_err:
+        logger.warning(f"Note on drive queue recovery on startup: {q_err}")
+
     yield
 
     # Shutdown actions

@@ -49,6 +49,58 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [copiedFileId, setCopiedFileId] = useState<string | null>(null);
 
+  // Google Drive Connection & Queue Status
+  const [gdriveStatus, setGDriveStatus] = useState<any>(null);
+  const [gdriveTokenInput, setGDriveTokenInput] = useState<string>('');
+  const [gdriveUpdating, setGDriveUpdating] = useState<boolean>(false);
+  const [gdriveSyncing, setGDriveSyncing] = useState<boolean>(false);
+
+  const fetchGDriveStatus = async () => {
+    try {
+      const data = await apiService.getGDriveStatus();
+      setGDriveStatus(data);
+    } catch (err) {
+      console.error('Error fetching gdrive status', err);
+    }
+  };
+
+  const handleUpdateGDriveToken = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!gdriveTokenInput.trim()) {
+      alert('Please enter a valid Google Drive Refresh Token.');
+      return;
+    }
+    setGDriveUpdating(true);
+    try {
+      const res = await apiService.updateGDriveToken(gdriveTokenInput.trim());
+      alert(res.message || 'Google Drive connected successfully!');
+      setGDriveTokenInput('');
+      await fetchGDriveStatus();
+      fetchDashboardData();
+    } catch (err: any) {
+      alert(`Token update failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setGDriveUpdating(false);
+    }
+  };
+
+  const handleSyncAllPendingDrive = async () => {
+    if (!confirm('Enqueue all pending/failed submissions into the sequential Google Drive archive queue?')) {
+      return;
+    }
+    setGDriveSyncing(true);
+    try {
+      const res = await apiService.syncAllPendingDrive();
+      alert(res.message || 'Pending files added to transfer queue.');
+      await fetchGDriveStatus();
+      fetchDashboardData();
+    } catch (err: any) {
+      alert(`Sync failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setGDriveSyncing(false);
+    }
+  };
+
   const fetchWifiInfo = async () => {
     try {
       const data = await apiService.getNetworkInfo();
@@ -88,7 +140,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const [m, s] = await Promise.all([
+      const [m, s, gd] = await Promise.all([
         apiService.getMetrics(),
         apiService.getSubmissions({
           search: search || undefined,
@@ -99,9 +151,11 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
           sort_by: sortBy || undefined,
           sort_order: sortOrder || undefined,
         }),
+        apiService.getGDriveStatus().catch(() => null),
       ]);
       setMetrics(m);
       setSubmissions(s.items || []);
+      if (gd) setGDriveStatus(gd);
     } catch (err) {
       console.error('Error fetching dashboard data', err);
     } finally {
@@ -733,9 +787,35 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-          <span className="text-[11px] font-bold text-brand-600 uppercase block">Drive Pending</span>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-brand-600 uppercase block">Drive Pending</span>
+            {gdriveStatus && !gdriveStatus.connected ? (
+              <span className="px-1.5 py-0.5 bg-rose-100 text-rose-800 text-[9px] font-bold rounded animate-pulse" title="Google Drive token expired">
+                Auth Needed
+              </span>
+            ) : gdriveStatus?.queue_status?.is_busy ? (
+              <span className="px-1.5 py-0.5 bg-blue-100 text-blue-800 text-[9px] font-bold rounded flex items-center space-x-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-ping"></span>
+                <span>Active</span>
+              </span>
+            ) : (
+              <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[9px] font-bold rounded">
+                Queue Ready
+              </span>
+            )}
+          </div>
           <span className="text-2xl font-black text-brand-700 mt-1 block">{metrics?.drive_pending_submissions || 0}</span>
-          <span className="text-[10px] text-brand-500 mt-1 block">Queued in worker</span>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-[10px] text-brand-500 block">
+              {gdriveStatus?.queue_status?.queue_size ? `${gdriveStatus.queue_status.queue_size} in serial queue` : 'Sequential queue'}
+            </span>
+            <button
+              onClick={() => setShowSettings(true)}
+              className="text-[10px] font-bold text-brand-600 hover:text-brand-800 hover:underline cursor-pointer"
+            >
+              Config Drive →
+            </button>
+          </div>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
@@ -1157,9 +1237,19 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold inline-block ${
                             sub.drive_completed
                               ? 'bg-emerald-100 text-emerald-800'
+                              : (vidFile?.upload_status === 'TRANSFER_QUEUED' || pptFile?.upload_status === 'TRANSFER_QUEUED')
+                              ? 'bg-blue-100 text-blue-800'
+                              : (vidFile?.upload_status === 'FAILED' || pptFile?.upload_status === 'FAILED')
+                              ? 'bg-rose-100 text-rose-800'
                               : 'bg-amber-100 text-amber-800'
                           }`}>
-                            {sub.drive_completed ? 'Archived in Drive' : 'Drive Pending'}
+                            {sub.drive_completed
+                              ? 'Archived in Drive'
+                              : (vidFile?.upload_status === 'TRANSFER_QUEUED' || pptFile?.upload_status === 'TRANSFER_QUEUED')
+                              ? 'In Queue (Serial)'
+                              : (vidFile?.upload_status === 'FAILED' || pptFile?.upload_status === 'FAILED')
+                              ? 'Drive Failed (Retry)'
+                              : 'Drive Pending'}
                           </span>
                           <div className="flex flex-wrap items-center gap-1">
                             {pptFile && (pptFile.admin_drive_url || pptFile.drive_file_id) && (
@@ -1358,11 +1448,21 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                           <span className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-bold self-start sm:self-auto ${
                             f.upload_status === 'DRIVE_COMPLETED'
                               ? 'bg-emerald-100 text-emerald-800'
-                              : (f.upload_status === 'FAILED' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800')
+                              : f.upload_status === 'FAILED'
+                              ? 'bg-rose-100 text-rose-800'
+                              : f.upload_status === 'TRANSFER_QUEUED'
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-amber-100 text-amber-800'
                           }`}>
-                            {f.upload_status}
+                            {f.upload_status === 'TRANSFER_QUEUED' ? 'In Serial Queue' : f.upload_status === 'TRANSFERRING' ? 'Transferring...' : f.upload_status}
                           </span>
                         </div>
+
+                        {f.error_message && (
+                          <div className="p-2 bg-rose-50 border border-rose-200 rounded text-rose-800 text-[11px] font-medium break-all">
+                            <span className="font-bold">Failure reason:</span> {f.error_message}
+                          </div>
+                        )}
 
                         <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-3">
                           <span><b>Type:</b> {f.file_type.toUpperCase()}</span>
@@ -1965,6 +2065,91 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                   className="rounded"
                 />
                 <label htmlFor="pdf_req" className="font-semibold text-slate-800">Make PDF companion mandatory</label>
+              </div>
+
+              {/* Google Drive Archival Connection & Queue Controls */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <Cloud className="w-4 h-4 text-brand-600" />
+                      Google Drive Archival &amp; Serial Queue
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Sequential single-worker queue to archive student videos without timeouts
+                    </p>
+                  </div>
+                  <span className={`self-start sm:self-auto px-2 py-0.5 rounded text-[10px] font-bold ${
+                    gdriveStatus?.connected
+                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                      : 'bg-rose-100 text-rose-800 border border-rose-200 animate-pulse'
+                  }`}>
+                    {gdriveStatus?.connected ? '✓ Drive Connected' : '⚠️ Action Needed: Token Expired'}
+                  </span>
+                </div>
+
+                {gdriveStatus && !gdriveStatus.connected && (
+                  <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-900 text-[11px] space-y-1">
+                    <p className="font-bold flex items-center gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                      Google Drive Refresh Token is Expired or Revoked!
+                    </p>
+                    <p className="text-rose-700">
+                      Google OAuth requires renewing the refresh token. Paste a newly generated refresh token below to immediately reconnect Drive and clear pending queues.
+                    </p>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                  <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                    <span className="text-slate-400 block text-[10px]">Active Token:</span>
+                    <span className="font-mono font-bold text-slate-800 break-all">{gdriveStatus?.masked_token || 'None'}</span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                    <span className="text-slate-400 block text-[10px]">Pending Files to Archive:</span>
+                    <span className="font-bold text-slate-800">{gdriveStatus?.pending_files_count ?? (metrics?.drive_pending_submissions || 0)} files</span>
+                  </div>
+                </div>
+
+                {/* Token Update Box */}
+                <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-2">
+                  <label className="block text-[11px] font-bold text-slate-800">
+                    Update Google Drive Refresh Token:
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Paste fresh 1//0... token here"
+                      value={gdriveTokenInput}
+                      onChange={(e) => setGDriveTokenInput(e.target.value)}
+                      className="flex-1 px-3 py-1.5 border border-slate-300 rounded-lg bg-slate-50 text-slate-900 font-mono text-[11px]"
+                    />
+                    <button
+                      type="button"
+                      disabled={gdriveUpdating || !gdriveTokenInput.trim()}
+                      onClick={handleUpdateGDriveToken}
+                      className="px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg font-bold text-xs shrink-0 disabled:opacity-50 cursor-pointer"
+                    >
+                      {gdriveUpdating ? 'Verifying...' : 'Connect Token'}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Need a token? Use <a href="https://developers.google.com/oauthplayground" target="_blank" rel="noreferrer" className="text-brand-600 underline font-semibold">Google OAuth Playground ↗</a> with scope <code className="bg-slate-100 px-1 py-0.5 rounded text-[9px]">https://www.googleapis.com/auth/drive.file</code>.
+                  </p>
+                </div>
+
+                {/* Action button to sync all pending files */}
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    disabled={gdriveSyncing || !gdriveStatus?.connected}
+                    onClick={handleSyncAllPendingDrive}
+                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg font-bold text-xs cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${gdriveSyncing ? 'animate-spin' : ''}`} />
+                    <span>{gdriveSyncing ? 'Syncing...' : 'Sync All Pending Files Now (Sequential Queue)'}</span>
+                  </button>
+                </div>
               </div>
 
               <div className="pt-3 border-t flex justify-end gap-2">

@@ -180,6 +180,21 @@ export const apiService = {
     return res.data;
   },
 
+  async getGDriveStatus() {
+    const res = await api.get('/admin/gdrive/status');
+    return res.data;
+  },
+
+  async updateGDriveToken(refreshToken: string) {
+    const res = await api.post('/admin/gdrive/update-token', { refresh_token: refreshToken });
+    return res.data;
+  },
+
+  async syncAllPendingDrive() {
+    const res = await api.post('/admin/gdrive/sync-all-pending');
+    return res.data;
+  },
+
   getCsvExportUrl(filters: { section?: string; branch?: string; category?: string; deadline_status?: string; search?: string; sort_by?: string; sort_order?: string } = {}) {
     const params = new URLSearchParams();
     const token = localStorage.getItem('uhv_admin_token');

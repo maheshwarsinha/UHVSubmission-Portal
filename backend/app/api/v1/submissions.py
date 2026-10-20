@@ -304,15 +304,10 @@ def submit_assignment(
     else:
         background_tasks.add_task(execute_email_dispatch, submission.id)
 
-    # Enqueue file transfers to Google Drive
+    # Enqueue file transfers to Google Drive via serial FIFO queue
+    from app.services.drive_queue import drive_queue
     for sub_file in created_files:
-        if use_celery:
-            try:
-                upload_file_to_gdrive_task.delay(submission.id, sub_file.id)
-            except Exception:
-                background_tasks.add_task(execute_drive_transfer, submission.id, sub_file.id)
-        else:
-            background_tasks.add_task(execute_drive_transfer, submission.id, sub_file.id)
+        drive_queue.enqueue(submission.id, sub_file.id)
 
     return build_receipt_response(submission)
 

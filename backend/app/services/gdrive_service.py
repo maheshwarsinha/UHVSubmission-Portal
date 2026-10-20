@@ -16,9 +16,10 @@ logger = logging.getLogger("gdrive_service")
 
 class GDriveService:
     def __init__(self):
-        self.enabled = settings.GDRIVE_ENABLED and bool(settings.GDRIVE_REFRESH_TOKEN)
+        self.enabled = settings.GDRIVE_ENABLED and bool(self.get_active_refresh_token())
         self.service = None
         self._folder_cache: Dict[str, str] = {}
+        self.redis_client = None
         if redis and getattr(settings, "REDIS_URL", None):
             try:
                 test_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True, socket_connect_timeout=1.0)
@@ -31,11 +32,33 @@ class GDriveService:
         if self.enabled:
             self._init_service()
 
-    def _init_service(self):
+    @staticmethod
+    def get_active_refresh_token() -> str:
+        try:
+            from app.db.session import SessionLocal
+            from app.models import SystemSetting
+            db = SessionLocal()
+            try:
+                rec = db.query(SystemSetting).filter(SystemSetting.key == "gdrive_refresh_token").first()
+                if rec and rec.value and str(rec.value).strip():
+                    return str(rec.value).strip()
+            finally:
+                db.close()
+        except Exception:
+            pass
+        return settings.GDRIVE_REFRESH_TOKEN or ""
+
+    def _init_service(self, token: Optional[str] = None):
+        active_token = token or self.get_active_refresh_token()
+        self.enabled = settings.GDRIVE_ENABLED and bool(active_token)
+        if not self.enabled:
+            self.service = None
+            return
+
         try:
             creds = Credentials(
                 token=None,
-                refresh_token=settings.GDRIVE_REFRESH_TOKEN,
+                refresh_token=active_token,
                 token_uri="https://oauth2.googleapis.com/token",
                 client_id=settings.GDRIVE_CLIENT_ID,
                 client_secret=settings.GDRIVE_CLIENT_SECRET,
@@ -46,6 +69,36 @@ class GDriveService:
         except Exception as e:
             logger.error(f"Failed to initialize Google Drive client: {e}")
             self.service = None
+
+    def reconnect(self, new_token: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Reinitializes Google Drive client with a new or active token and verifies it.
+        """
+        token = new_token or self.get_active_refresh_token()
+        if not token:
+            return False, "No Google Drive refresh token provided or configured."
+
+        try:
+            from google.auth.transport.requests import Request
+            creds = Credentials(
+                token=None,
+                refresh_token=token,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=settings.GDRIVE_CLIENT_ID,
+                client_secret=settings.GDRIVE_CLIENT_SECRET,
+                scopes=["https://www.googleapis.com/auth/drive.file"]
+            )
+            creds.refresh(Request())
+            srv = build("drive", "v3", credentials=creds, cache_discovery=False)
+            srv.files().list(pageSize=1, fields="files(id)").execute()
+            self.service = srv
+            self.enabled = True
+            self._folder_cache.clear()
+            logger.info("Google Drive reconnected and verified successfully.")
+            return True, "Google Drive connection successfully authenticated."
+        except Exception as e:
+            logger.error(f"Failed to reconnect Google Drive: {e}")
+            return False, f"Google Drive authentication failed: {e}"
 
     def get_or_create_folder(self, folder_name: str, parent_folder_id: Optional[str] = None) -> Optional[str]:
         """
