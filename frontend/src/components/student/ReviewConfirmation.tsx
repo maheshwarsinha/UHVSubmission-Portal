@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CheckSquare, Square, ShieldCheck, AlertCircle, ArrowRight, Loader2, Folder, ExternalLink } from 'lucide-react';
-import { StudentFormData, StagedFile, AssignmentConfig } from '../../types';
+import { StudentFormData, StagedFile, AssignmentConfig, FolderVerificationResult } from '../../types';
 
 interface ReviewConfirmationProps {
   formData: StudentFormData;
@@ -11,6 +11,7 @@ interface ReviewConfirmationProps {
   };
   folderUrl?: string;
   folderName?: string;
+  folderVerification?: FolderVerificationResult | null;
   config: AssignmentConfig | null;
   onSubmit: () => void;
   isSubmitting: boolean;
@@ -21,17 +22,21 @@ export const ReviewConfirmation: React.FC<ReviewConfirmationProps> = ({
   stagedFiles,
   folderUrl,
   folderName,
+  folderVerification,
   config,
   onSubmit,
   isSubmitting,
 }) => {
   const [declared, setDeclared] = useState<boolean>(false);
 
+  const isFolderValid = Boolean(folderVerification?.is_valid);
+
   const canSubmit = Boolean(
     formData.name &&
     formData.roll_number &&
     formData.section &&
     formData.topic &&
+    isFolderValid &&
     stagedFiles.ppt &&
     stagedFiles.video &&
     (!config?.pdf_required || stagedFiles.pdf) &&
@@ -97,24 +102,58 @@ export const ReviewConfirmation: React.FC<ReviewConfirmationProps> = ({
           </h4>
           <div className="space-y-2.5 text-xs">
             {/* Google Drive Folder Banner */}
-            {folderUrl && (
-              <div className="p-2.5 rounded-lg border border-indigo-200 bg-indigo-50/70 flex justify-between items-center">
+            {folderVerification?.is_valid ? (
+              <div className="p-2.5 rounded-lg border border-emerald-200 bg-emerald-50/70 flex justify-between items-center">
                 <div className="flex items-center space-x-2 min-w-0 pr-2">
-                  <Folder className="w-4 h-4 text-indigo-700 shrink-0" />
+                  <Folder className="w-4 h-4 text-emerald-700 shrink-0" />
                   <div className="min-w-0">
-                    <p className="font-semibold text-indigo-950 truncate">Folder: {folderName || formData.roll_number}</p>
-                    <a
-                      href={folderUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-[10px] text-indigo-700 hover:underline flex items-center space-x-1 mt-0.5 truncate"
-                    >
-                      <span>Drive Folder ↗</span>
-                    </a>
+                    <p className="font-semibold text-emerald-950 truncate">
+                      Folder: {folderVerification.folder_name || folderName || formData.roll_number}
+                    </p>
+                    {folderUrl && (
+                      <a
+                        href={folderUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-emerald-700 hover:underline flex items-center space-x-1 mt-0.5 truncate"
+                      >
+                        <span>Drive Folder ↗</span>
+                      </a>
+                    )}
                   </div>
                 </div>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 shrink-0">
                   Folder Verified ✓
+                </span>
+              </div>
+            ) : folderUrl ? (
+              <div className="p-2.5 rounded-lg border border-rose-200 bg-rose-50/70 flex justify-between items-center">
+                <div className="flex items-center space-x-2 min-w-0 pr-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-semibold text-rose-950 truncate">
+                      Folder: {folderVerification?.folder_name || 'Issues Detected / Invalid'}
+                    </p>
+                    <p className="text-[10px] text-rose-600 truncate mt-0.5">
+                      {folderVerification?.message || 'Folder verification required in Step 3'}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 shrink-0">
+                  Issues Detected ✗
+                </span>
+              </div>
+            ) : (
+              <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50 flex justify-between items-center">
+                <div className="flex items-center space-x-2 min-w-0 pr-2">
+                  <Folder className="w-4 h-4 text-slate-400 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-700 truncate">Folder: Not Provided</p>
+                    <p className="text-[10px] text-slate-400 truncate mt-0.5">Paste Google Drive link in Step 3</p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 shrink-0">
+                  Missing
                 </span>
               </div>
             )}
@@ -243,8 +282,18 @@ export const ReviewConfirmation: React.FC<ReviewConfirmationProps> = ({
       {/* Submit Action */}
       <div className="mt-6 flex flex-col sm:flex-row justify-end items-center gap-4 pt-5 border-t border-slate-100">
         {!canSubmit && (
-          <span className="text-xs text-slate-400 text-center sm:text-right">
-            Ensure all required steps and declaration are complete.
+          <span className="text-xs text-rose-600 font-medium text-center sm:text-right">
+            {!formData.name || !formData.roll_number || !formData.section || !formData.topic
+              ? 'Please complete Step 1 (Student Information).'
+              : !folderUrl
+              ? 'Please paste your Google Drive folder link in Step 3.'
+              : !isFolderValid
+              ? 'Please resolve Google Drive folder issues in Step 3.'
+              : !stagedFiles.ppt || !stagedFiles.video
+              ? 'Required presentation files are missing from folder.'
+              : !declared
+              ? 'Please check the declaration box to confirm.'
+              : 'Ensure all required steps and declaration are complete.'}
           </span>
         )}
         <button

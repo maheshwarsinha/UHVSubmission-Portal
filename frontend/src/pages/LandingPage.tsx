@@ -250,7 +250,8 @@ export const LandingPage: React.FC = () => {
         formData={formData}
         stagedFiles={stagedFiles}
         folderUrl={folderUrl}
-        folderName={folderVerification?.folder_name || formData.roll_number}
+        folderName={folderVerification?.folder_name || ''}
+        folderVerification={folderVerification}
         config={config}
         onSubmit={handleFinalSubmit}
         isSubmitting={isSubmitting}

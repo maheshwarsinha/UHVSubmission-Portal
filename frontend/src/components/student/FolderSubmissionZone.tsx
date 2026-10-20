@@ -59,6 +59,12 @@ export const FolderSubmissionZone: React.FC<FolderSubmissionZoneProps> = ({
       return;
     }
 
+    // Reset previous verification result immediately when the user changes URL
+    if (verificationResult && verificationResult.folder_url !== value.trim()) {
+      setVerificationResult(null);
+      onVerificationChange(null, value.trim());
+    }
+
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
     }
