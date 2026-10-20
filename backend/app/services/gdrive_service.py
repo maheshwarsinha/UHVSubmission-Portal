@@ -35,7 +35,7 @@ class GDriveService:
     @staticmethod
     def get_active_refresh_token() -> str:
         try:
-            from app.db.session import SessionLocal
+            from app.core.database import SessionLocal
             from app.models import SystemSetting
             db = SessionLocal()
             try:

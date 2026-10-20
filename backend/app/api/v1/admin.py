@@ -1015,23 +1015,34 @@ def get_gdrive_status(
     db: Session = Depends(get_db),
     current_admin: Administrator = Depends(get_current_admin)
 ):
-    from app.services.gdrive_service import gdrive_service
-    from app.services.drive_queue import drive_queue
+    try:
+        from app.services.gdrive_service import gdrive_service
+        from app.services.drive_queue import drive_queue
 
-    active_token = gdrive_service.get_active_refresh_token()
-    is_valid, msg = gdrive_service.reconnect() if active_token else (False, "No refresh token configured")
-    
-    pending_count = db.query(SubmissionFile).filter(SubmissionFile.upload_status != "DRIVE_COMPLETED").count()
-    masked_token = (active_token[:8] + "..." + active_token[-6:]) if len(active_token) > 14 else ("Configured" if active_token else "Not Set")
+        active_token = gdrive_service.get_active_refresh_token()
+        is_valid, msg = gdrive_service.reconnect() if active_token else (False, "No refresh token configured")
+        
+        pending_count = db.query(SubmissionFile).filter(SubmissionFile.upload_status != "DRIVE_COMPLETED").count()
+        masked_token = (active_token[:8] + "..." + active_token[-6:]) if len(active_token) > 14 else ("Configured" if active_token else "Not Set")
 
-    return {
-        "connected": is_valid,
-        "message": msg,
-        "has_token": bool(active_token),
-        "masked_token": masked_token,
-        "pending_files_count": pending_count,
-        "queue_status": drive_queue.get_status()
-    }
+        return {
+            "connected": is_valid,
+            "message": msg,
+            "has_token": bool(active_token),
+            "masked_token": masked_token,
+            "pending_files_count": pending_count,
+            "queue_status": drive_queue.get_status()
+        }
+    except Exception as e:
+        logger.error(f"Error in get_gdrive_status: {e}")
+        return {
+            "connected": False,
+            "message": str(e),
+            "has_token": False,
+            "masked_token": "Error",
+            "pending_files_count": 0,
+            "queue_status": {"queue_size": 0, "current_task": None, "is_busy": False}
+        }
 
 @router.post("/gdrive/update-token")
 def update_gdrive_token(
@@ -1046,41 +1057,47 @@ def update_gdrive_token(
     from app.services.gdrive_service import gdrive_service
     from app.services.drive_queue import drive_queue
 
-    is_valid, msg = gdrive_service.reconnect(token)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=f"Google Drive verification failed: {msg}")
+    try:
+        is_valid, msg = gdrive_service.reconnect(token)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=f"Google Drive verification failed: {msg}")
 
-    # Save to SystemSetting in DB
-    setting = db.query(SystemSetting).filter(SystemSetting.key == "gdrive_refresh_token").first()
-    if not setting:
-        setting = SystemSetting(key="gdrive_refresh_token", value=token, description="Admin Google Drive OAuth Refresh Token")
-        db.add(setting)
-    else:
-        setting.value = token
-    db.commit()
+        # Save to SystemSetting in DB
+        setting = db.query(SystemSetting).filter(SystemSetting.key == "gdrive_refresh_token").first()
+        if not setting:
+            setting = SystemSetting(key="gdrive_refresh_token", value=token, description="Admin Google Drive OAuth Refresh Token")
+            db.add(setting)
+        else:
+            setting.value = token
+        db.commit()
 
-    # Re-initialize service
-    gdrive_service._init_service(token)
+        # Re-initialize service
+        gdrive_service._init_service(token)
 
-    # Automatically enqueue all pending/failed files
-    pending_files = db.query(SubmissionFile).filter(SubmissionFile.upload_status != "DRIVE_COMPLETED").all()
-    queued_count = 0
-    for pf in pending_files:
-        if drive_queue.enqueue(pf.submission_id, pf.id):
-            queued_count += 1
+        # Automatically enqueue all pending/failed files
+        pending_files = db.query(SubmissionFile).filter(SubmissionFile.upload_status != "DRIVE_COMPLETED").all()
+        queued_count = 0
+        for pf in pending_files:
+            if drive_queue.enqueue(pf.submission_id, pf.id):
+                queued_count += 1
 
-    log_audit(
-        db,
-        admin_id=current_admin.id,
-        action="GDRIVE_TOKEN_UPDATED",
-        details={"queued_files": queued_count}
-    )
+        log_audit(
+            db,
+            admin_id=current_admin.id,
+            action="GDRIVE_TOKEN_UPDATED",
+            details={"queued_files": queued_count}
+        )
 
-    return {
-        "success": True,
-        "message": f"Google Drive connected successfully! {queued_count} pending files queued for background transfer.",
-        "queued_files": queued_count
-    }
+        return {
+            "success": True,
+            "message": f"Google Drive connected successfully! {queued_count} pending files queued for background transfer.",
+            "queued_files": queued_count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating gdrive token: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal error updating token: {e}")
 
 @router.post("/gdrive/sync-all-pending")
 def sync_all_pending_drive_files(

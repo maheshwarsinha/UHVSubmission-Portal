@@ -5,7 +5,7 @@ import logging
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 
-from app.db.session import SessionLocal
+from app.core.database import SessionLocal
 from app.models import Submission, SubmissionFile, BackgroundJob
 from app.tasks.drive_tasks import execute_drive_transfer
 
