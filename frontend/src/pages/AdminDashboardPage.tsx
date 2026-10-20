@@ -140,7 +140,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const [m, s, gd] = await Promise.all([
+      const [m, s, gd, st] = await Promise.all([
         apiService.getMetrics(),
         apiService.getSubmissions({
           search: search || undefined,
@@ -152,10 +152,12 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
           sort_order: sortOrder || undefined,
         }),
         apiService.getGDriveStatus().catch(() => null),
+        apiService.getSettings().catch(() => null),
       ]);
       setMetrics(m);
       setSubmissions(s.items || []);
       if (gd) setGDriveStatus(gd);
+      if (st) setSettingsData(st);
     } catch (err) {
       console.error('Error fetching dashboard data', err);
     } finally {
@@ -601,6 +603,53 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
           <p className="text-xs text-slate-500">
             Logged in as <b>{adminName}</b> &bull; Evaluation Session 2026
           </p>
+
+          {/* Active Configuration Summary Pill Strip */}
+          <div className="flex flex-wrap items-center gap-2 mt-2.5">
+            {/* Active Deadline */}
+            <div 
+              onClick={openSettingsModal}
+              className="inline-flex items-center space-x-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-xs shadow-2xs cursor-pointer transition-colors"
+              title="Click to edit deadline in Settings"
+            >
+              <Calendar className="w-3.5 h-3.5 text-brand-600" />
+              <span className="text-slate-500 font-medium">Deadline:</span>
+              <span className="font-bold text-slate-800">{formatDeadlinePreview().text}</span>
+              {formatDeadlinePreview().daysDiffText && (
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                  formatDeadlinePreview().isPast 
+                    ? 'bg-rose-100 text-rose-700 border border-rose-200' 
+                    : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                }`}>
+                  {formatDeadlinePreview().isPast ? '⚠️ Passed' : `🟢 ${formatDeadlinePreview().daysDiffText}`}
+                </span>
+              )}
+            </div>
+
+            {/* Teacher Notification Email */}
+            <div 
+              onClick={openSettingsModal}
+              className="inline-flex items-center space-x-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-xs shadow-2xs cursor-pointer transition-colors"
+              title="Click to edit Teacher Email in Settings"
+            >
+              <Mail className="w-3.5 h-3.5 text-indigo-600" />
+              <span className="text-slate-500 font-medium">Teacher Alerts:</span>
+              <span className="font-bold text-slate-800 font-mono text-[11px]">{settingsData.teacher_email || 'maheshwarsinha7@gmail.com'}</span>
+            </div>
+
+            {/* GDrive Connection Status */}
+            <div 
+              onClick={openSettingsModal}
+              className="inline-flex items-center space-x-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-xs shadow-2xs cursor-pointer transition-colors"
+              title="Click to view Drive connection settings"
+            >
+              <Cloud className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="text-slate-500 font-medium">Drive Archival:</span>
+              <span className="font-bold text-emerald-700 text-[11px]">
+                {gdriveStatus?.connected ? '✓ Connected (Permanent)' : 'Connecting...'}
+              </span>
+            </div>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 mt-3 sm:mt-0">
