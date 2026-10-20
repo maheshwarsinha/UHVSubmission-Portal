@@ -1044,15 +1044,49 @@ def get_gdrive_status(
             "queue_status": {"queue_size": 0, "current_task": None, "is_busy": False}
         }
 
+def exchange_google_code_for_token(code: str) -> Tuple[Optional[str], Optional[str]]:
+    import urllib.request
+    import urllib.parse
+    import json
+    unquoted = urllib.parse.unquote(code.strip())
+    payload = urllib.parse.urlencode({
+        "code": unquoted,
+        "client_id": settings.GDRIVE_CLIENT_ID,
+        "client_secret": settings.GDRIVE_CLIENT_SECRET,
+        "redirect_uri": "https://developers.google.com/oauthplayground",
+        "grant_type": "authorization_code"
+    }).encode("utf-8")
+    req = urllib.request.Request("https://oauth2.googleapis.com/token", data=payload, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            rt = data.get("refresh_token")
+            if rt:
+                return rt, None
+            return None, "Google did not return a refresh_token (make sure prompt=consent is used)"
+    except urllib.error.HTTPError as he:
+        err_msg = he.read().decode("utf-8", errors="ignore")
+        return None, f"Google OAuth error: {err_msg}"
+    except Exception as ex:
+        return None, str(ex)
+
 @router.post("/gdrive/update-token")
 def update_gdrive_token(
     payload: GDriveTokenUpdate,
     db: Session = Depends(get_db),
     current_admin: Administrator = Depends(get_current_admin)
 ):
-    token = payload.refresh_token.strip()
-    if not token:
-        raise HTTPException(status_code=400, detail="Refresh token cannot be empty")
+    raw_token = payload.refresh_token.strip()
+    if not raw_token:
+        raise HTTPException(status_code=400, detail="Token or code cannot be empty")
+
+    token = raw_token
+    # If the user pasted an authorization code (starts with 4/ or 4%2F)
+    if raw_token.startswith("4/") or raw_token.startswith("4%2F"):
+        exchanged_token, err = exchange_google_code_for_token(raw_token)
+        if not exchanged_token:
+            raise HTTPException(status_code=400, detail=f"Failed to exchange authorization code: {err}")
+        token = exchanged_token
 
     from app.services.gdrive_service import gdrive_service
     from app.services.drive_queue import drive_queue

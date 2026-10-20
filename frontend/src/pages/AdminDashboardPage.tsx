@@ -2119,7 +2119,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      placeholder="Paste fresh 1//0... token here"
+                      placeholder="Paste fresh 1//0... token OR 4/0... auth code here"
                       value={gdriveTokenInput}
                       onChange={(e) => setGDriveTokenInput(e.target.value)}
                       className="flex-1 px-3 py-1.5 border border-slate-300 rounded-lg bg-slate-50 text-slate-900 font-mono text-[11px]"
@@ -2134,8 +2134,14 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                     </button>
                   </div>
                   <p className="text-[10px] text-slate-500">
-                    Need a token? Use <a href="https://developers.google.com/oauthplayground" target="_blank" rel="noreferrer" className="text-brand-600 underline font-semibold">Google OAuth Playground ↗</a> with scope <code className="bg-slate-100 px-1 py-0.5 rounded text-[9px]">https://www.googleapis.com/auth/drive.file</code>.
+                    Paste either a <b>Refresh Token</b> (<code className="bg-slate-100 px-1 py-0.5 rounded text-[9px]">1//0...</code>) or an <b>Authorization Code</b> (<code className="bg-slate-100 px-1 py-0.5 rounded text-[9px]">4/0...</code>).
                   </p>
+                  <div className="p-2 bg-emerald-50 border border-emerald-200 rounded text-emerald-900 text-[10px] space-y-0.5">
+                    <span className="font-bold text-emerald-800">💡 How to Make Token Permanent (Never Expires in 7 Days):</span>
+                    <p className="text-emerald-700">
+                      In <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" rel="noreferrer" className="underline font-bold text-emerald-800">Google Cloud Console → OAuth Consent Screen ↗</a>, click <b>"Publish App"</b> to switch from Testing to Production. Production tokens stay active permanently without expiring!
+                    </p>
+                  </div>
                 </div>
 
                 {/* Action button to sync all pending files */}
