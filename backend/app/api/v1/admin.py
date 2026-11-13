@@ -877,6 +877,16 @@ def update_submission_folder_links(
     if inspection.get("pdf_file"):
         candidates.append(("pdf", inspection["pdf_file"]))
 
+    # Deduplicate existing submission files: ensure only 1 record per file_type
+    all_current_files = db.query(SubmissionFile).filter(SubmissionFile.submission_id == submission.id).all()
+    seen_types = set()
+    for cf in all_current_files:
+        if cf.file_type in seen_types:
+            db.delete(cf)
+        else:
+            seen_types.add(cf.file_type)
+    db.commit()
+
     for f_type, finfo in candidates:
         sub_file = db.query(SubmissionFile).filter(
             SubmissionFile.submission_id == submission.id,

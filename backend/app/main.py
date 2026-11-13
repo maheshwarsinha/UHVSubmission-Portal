@@ -187,6 +187,16 @@ async def lifespan(app: FastAPI):
                     )
                     db_sync.add(new_sf)
             db_sync.commit()
+
+            # Ensure only 1 record per file_type exists
+            all_existing = db_sync.query(SubmissionFile).filter(SubmissionFile.submission_id == target_sub.id).all()
+            seen_t = set()
+            for ef in all_existing:
+                if ef.file_type in seen_t:
+                    db_sync.delete(ef)
+                else:
+                    seen_t.add(ef.file_type)
+            db_sync.commit()
             logger.info("Synchronized submission links for CSJMA24001390105.")
     except Exception as e:
         logger.warning(f"Note on syncing CSJMA24001390105: {e}")
