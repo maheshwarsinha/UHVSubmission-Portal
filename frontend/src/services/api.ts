@@ -165,6 +165,11 @@ export const apiService = {
     return res.data;
   },
 
+  async updateSubmissionFolder(submissionId: string, folderUrl: string) {
+    const res = await api.post(`/admin/submissions/${submissionId}/update-folder-links`, { folder_url: folderUrl });
+    return res.data;
+  },
+
   async testEmail(targetEmail?: string) {
     const res = await api.post('/admin/test-email', null, { params: targetEmail ? { target_email: targetEmail } : {} });
     return res.data;

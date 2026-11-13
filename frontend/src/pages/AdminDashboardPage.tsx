@@ -270,6 +270,26 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
     }
   };
 
+  const [updateFolderLoading, setUpdateFolderLoading] = useState<boolean>(false);
+
+  const handleUpdateSubmissionFolder = async (submissionId: string, currentUrl?: string) => {
+    const newUrl = prompt('Enter the new Google Drive folder URL for this submission:', currentUrl || '');
+    if (!newUrl || !newUrl.trim() || newUrl.trim() === currentUrl) return;
+    setUpdateFolderLoading(true);
+    try {
+      const res = await apiService.updateSubmissionFolder(submissionId, newUrl.trim());
+      alert(res.message || '✅ Submission folder and file links updated successfully!');
+      await fetchDashboardData();
+      if (selectedSub && selectedSub.id === submissionId) {
+        await handleViewDetail(submissionId);
+      }
+    } catch (err: any) {
+      alert(`❌ Failed to update submission folder: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setUpdateFolderLoading(false);
+    }
+  };
+
   const getCurrentFilters = () => ({
     section: sectionFilter || undefined,
     branch: branchFilter || undefined,
@@ -1134,6 +1154,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                 {(() => {
                   const vid = sub.files.find((f: any) => f.file_type === 'video');
                   const ppt = sub.files.find((f: any) => f.file_type === 'ppt');
+                  const pdf = sub.files.find((f: any) => f.file_type === 'pdf');
                   return (
                     <>
                       {vid?.source_drive_url && (
@@ -1156,6 +1177,17 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                         >
                           <ExternalLink className="w-3 h-3" />
                           <span>PPT ↗</span>
+                        </a>
+                      )}
+                      {pdf?.source_drive_url && (
+                        <a
+                          href={pdf.source_drive_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>PDF ↗</span>
                         </a>
                       )}
                     </>
@@ -1197,6 +1229,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                 submissions.map((sub) => {
                   const vidFile = sub.files.find((f: any) => f.file_type === 'video');
                   const pptFile = sub.files.find((f: any) => f.file_type === 'ppt');
+                  const pdfFile = sub.files.find((f: any) => f.file_type === 'pdf');
                   const adminFile = sub.files.find((f: any) => f.admin_drive_url || f.drive_file_id);
                   const adminUrl = adminFile?.admin_drive_url || (adminFile?.drive_file_id ? `https://drive.google.com/file/d/${adminFile.drive_file_id}/view` : null);
 
@@ -1274,7 +1307,22 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                             </a>
                           ) : null}
 
-                          {!sub.source_folder_url && !vidFile?.source_drive_url && !pptFile?.source_drive_url && (
+                          {pdfFile?.source_drive_url ? (
+                            <a
+                              href={pdfFile.source_drive_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-colors"
+                              title={`View Student PDF in Drive (${pdfFile.link_accessibility_status || 'View'})`}
+                            >
+                              <span>📄 PDF ↗</span>
+                              {pdfFile.link_accessibility_status === 'RESTRICTED' && (
+                                <span className="text-[9px] text-rose-600 font-bold" title="Access is restricted">⚠️</span>
+                              )}
+                            </a>
+                          ) : null}
+
+                          {!sub.source_folder_url && !vidFile?.source_drive_url && !pptFile?.source_drive_url && !pdfFile?.source_drive_url && (
                             <span className="text-[10px] text-slate-400 italic">No Links</span>
                           )}
                         </div>
@@ -1286,17 +1334,17 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold inline-block ${
                             sub.drive_completed
                               ? 'bg-emerald-100 text-emerald-800'
-                              : (vidFile?.upload_status === 'TRANSFER_QUEUED' || pptFile?.upload_status === 'TRANSFER_QUEUED')
+                              : (vidFile?.upload_status === 'TRANSFER_QUEUED' || pptFile?.upload_status === 'TRANSFER_QUEUED' || pdfFile?.upload_status === 'TRANSFER_QUEUED')
                               ? 'bg-blue-100 text-blue-800'
-                              : (vidFile?.upload_status === 'FAILED' || pptFile?.upload_status === 'FAILED')
+                              : (vidFile?.upload_status === 'FAILED' || pptFile?.upload_status === 'FAILED' || pdfFile?.upload_status === 'FAILED')
                               ? 'bg-rose-100 text-rose-800'
                               : 'bg-amber-100 text-amber-800'
                           }`}>
                             {sub.drive_completed
                               ? 'Archived in Drive'
-                              : (vidFile?.upload_status === 'TRANSFER_QUEUED' || pptFile?.upload_status === 'TRANSFER_QUEUED')
+                              : (vidFile?.upload_status === 'TRANSFER_QUEUED' || pptFile?.upload_status === 'TRANSFER_QUEUED' || pdfFile?.upload_status === 'TRANSFER_QUEUED')
                               ? 'In Queue (Serial)'
-                              : (vidFile?.upload_status === 'FAILED' || pptFile?.upload_status === 'FAILED')
+                              : (vidFile?.upload_status === 'FAILED' || pptFile?.upload_status === 'FAILED' || pdfFile?.upload_status === 'FAILED')
                               ? 'Drive Failed (Retry)'
                               : 'Drive Pending'}
                           </span>
@@ -1321,6 +1369,17 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                                 title="Watch Video in Google Drive"
                               >
                                 <span>🎬 Video ↗</span>
+                              </a>
+                            )}
+                            {pdfFile && (pdfFile.admin_drive_url || pdfFile.drive_file_id) && (
+                              <a
+                                href={pdfFile.admin_drive_url?.startsWith('http') ? pdfFile.admin_drive_url : `https://drive.google.com/file/d/${pdfFile.drive_file_id}/view`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200 transition-colors"
+                                title="Open PDF Preview in Google Drive"
+                              >
+                                <span>📄 PDF ↗</span>
                               </a>
                             )}
                           </div>
@@ -1452,9 +1511,17 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ onLogout
                         navigator.clipboard.writeText(selectedSub.source_folder_url);
                         alert('Folder link copied to clipboard!');
                       }}
-                      className="flex-1 sm:flex-none justify-center px-2.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold"
+                      className="flex-1 sm:flex-none justify-center px-2.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold cursor-pointer"
                     >
                       Copy Link
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateSubmissionFolder(selectedSub.id, selectedSub.source_folder_url)}
+                      disabled={updateFolderLoading}
+                      className="flex-1 sm:flex-none justify-center px-2.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-xs font-semibold cursor-pointer"
+                    >
+                      {updateFolderLoading ? 'Updating...' : '✏️ Update Folder Link'}
                     </button>
                   </div>
                 </div>

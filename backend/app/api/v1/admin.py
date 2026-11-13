@@ -6,6 +6,7 @@ import pytz
 import psutil
 import logging
 from typing import Optional, List, Dict, Any, Tuple
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -823,6 +824,122 @@ def transfer_single_submission_file(
     return {
         "status": "processing",
         "message": "File transfer added to serial queue."
+    }
+
+class UpdateFolderLinksPayload(BaseModel):
+    folder_url: str
+
+@router.post("/submissions/{submission_id}/update-folder-links")
+def update_submission_folder_links(
+    submission_id: str,
+    payload: UpdateFolderLinksPayload,
+    db: Session = Depends(get_db),
+    current_admin: Administrator = Depends(get_current_admin)
+):
+    """
+    Admin endpoint to update a student's submission folder link and refresh/reconcile
+    the PPT, Video, and PDF files from the new Google Drive folder.
+    Preserves all student metadata, timestamps, and classifications.
+    """
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    student = submission.student
+    category = student.student_category if student else "Regular"
+    roll_number = student.roll_number if student else ""
+    section = student.section if student else ""
+    name = student.name if student else ""
+
+    from app.services.gdrive_link_service import GDriveLinkService
+    inspection = GDriveLinkService.inspect_drive_folder(
+        folder_url=payload.folder_url,
+        roll_number=roll_number,
+        section=section,
+        name=name,
+        category=category
+    )
+
+    clean_folder_id = inspection.get("folder_id") or GDriveLinkService.extract_folder_id(payload.folder_url)
+    clean_folder_url = f"https://drive.google.com/drive/folders/{clean_folder_id}?usp=sharing" if clean_folder_id else payload.folder_url
+
+    submission.source_folder_url = clean_folder_url
+    submission.source_folder_id = clean_folder_id
+    if inspection.get("folder_name"):
+        submission.folder_name = inspection.get("folder_name")
+    submission.folder_verification_status = inspection.get("status") or "ACCESSIBLE"
+
+    candidates = []
+    if inspection.get("ppt_file"):
+        candidates.append(("ppt", inspection["ppt_file"]))
+    if inspection.get("video_file"):
+        candidates.append(("video", inspection["video_file"]))
+    if inspection.get("pdf_file"):
+        candidates.append(("pdf", inspection["pdf_file"]))
+
+    for f_type, finfo in candidates:
+        sub_file = db.query(SubmissionFile).filter(
+            SubmissionFile.submission_id == submission.id,
+            SubmissionFile.file_type == f_type
+        ).first()
+
+        mime = (
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation" if f_type == "ppt"
+            else ("video/mp4" if f_type == "video" else "application/pdf")
+        )
+
+        if not sub_file:
+            sub_file = SubmissionFile(
+                submission_id=submission.id,
+                file_type=f_type,
+                original_filename=finfo.get("name") or finfo.get("expected_filename", f"{roll_number}.{f_type}"),
+                expected_filename=finfo.get("expected_filename") or finfo.get("name", f"{roll_number}.{f_type}"),
+                mime_type=mime,
+                file_size=finfo.get("size_bytes", 0),
+                source_drive_url=finfo.get("source_drive_url"),
+                source_file_id=finfo.get("file_id"),
+                link_accessibility_status=finfo.get("link_accessibility_status", "ACCESSIBLE"),
+                upload_status="TRANSFER_QUEUED",
+                verification_status=True
+            )
+            db.add(sub_file)
+        else:
+            sub_file.original_filename = finfo.get("name") or sub_file.original_filename
+            sub_file.expected_filename = finfo.get("expected_filename") or sub_file.expected_filename
+            sub_file.source_drive_url = finfo.get("source_drive_url")
+            sub_file.source_file_id = finfo.get("file_id")
+            sub_file.link_accessibility_status = finfo.get("link_accessibility_status", "ACCESSIBLE")
+            sub_file.upload_status = "TRANSFER_QUEUED"
+            sub_file.drive_file_id = None
+            sub_file.admin_drive_url = None
+            sub_file.verification_status = True
+
+    db.commit()
+    db.refresh(submission)
+
+    # Reconcile if files already present in Admin Drive
+    reconcile_submission_drive_files(submission, db)
+
+    # Enqueue remaining in serial drive queue
+    from app.services.drive_queue import drive_queue
+    for sf in submission.files:
+        if sf.upload_status != "DRIVE_COMPLETED":
+            drive_queue.enqueue(submission.id, sf.id)
+
+    log_audit(
+        db,
+        admin_id=current_admin.id,
+        action="UPDATE_SUBMISSION_FOLDER_LINKS",
+        resource_type="Submission",
+        resource_id=submission.id,
+        details={"folder_url": clean_folder_url, "files_updated": len(candidates)}
+    )
+
+    return {
+        "success": True,
+        "message": "Submission folder and file links successfully updated.",
+        "submission_id": submission.id,
+        "files_count": len(submission.files)
     }
 
 @router.post("/test-email")

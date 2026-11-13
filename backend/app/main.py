@@ -86,6 +86,113 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # 2b. Reconcile specific student submission updates if present
+    db_sync = SessionLocal()
+    try:
+        from app.models import Submission, SubmissionFile, Student
+        target_sub = db_sync.query(Submission).filter(
+            Submission.id == "9806f0cc-80b4-42db-860e-9100846508a2"
+        ).first()
+        if not target_sub:
+            target_sub = (
+                db_sync.query(Submission)
+                .join(Student)
+                .filter(Student.roll_number == "CSJMA24001390105")
+                .first()
+            )
+        if target_sub:
+            target_sub.source_folder_url = "https://drive.google.com/drive/folders/1doB2_OX7I5f4RBxHKDoGwtnTKLKd-7J0?usp=sharing"
+            target_sub.source_folder_id = "1doB2_OX7I5f4RBxHKDoGwtnTKLKd-7J0"
+            target_sub.folder_name = "CSJMA24001390105"
+            target_sub.folder_verification_status = "ACCESSIBLE"
+            target_sub.status = "COMPLETED"
+
+            file_configs = [
+                {
+                    "file_type": "ppt",
+                    "original_filename": "CSJMA24001390105_Backlog_R_R_Maheshwar.pptx",
+                    "expected_filename": "CSJMA24001390105_Backlog_R_R_Maheshwar.pptx",
+                    "mime_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    "file_size": 3663120,
+                    "source_drive_url": "https://drive.google.com/file/d/1Z1_1IHKDnwZ0uNmev-ZA5T49eab_1kvn/view",
+                    "source_file_id": "1Z1_1IHKDnwZ0uNmev-ZA5T49eab_1kvn",
+                    "drive_file_id": "1p1boYJJwvcs5oINyeP0F7OeW4WPKpWWW",
+                    "admin_drive_url": "https://drive.google.com/file/d/1p1boYJJwvcs5oINyeP0F7OeW4WPKpWWW/view",
+                    "upload_status": "DRIVE_COMPLETED",
+                    "verification_status": True,
+                    "link_accessibility_status": "ACCESSIBLE",
+                },
+                {
+                    "file_type": "video",
+                    "original_filename": "CSJMA24001390105_Backlog_R_R_Maheshwar.mp4",
+                    "expected_filename": "CSJMA24001390105_Backlog_R_R_Maheshwar.mp4",
+                    "mime_type": "video/mp4",
+                    "file_size": 62522469,
+                    "source_drive_url": "https://drive.google.com/file/d/1H1HPMwvy2Pz9NpsV6MOJxqlDxTLCccpu/view",
+                    "source_file_id": "1H1HPMwvy2Pz9NpsV6MOJxqlDxTLCccpu",
+                    "drive_file_id": "1IUAQCLlE0kW7gUs7Xv34fFt-FQZV-hjs",
+                    "admin_drive_url": "https://drive.google.com/file/d/1IUAQCLlE0kW7gUs7Xv34fFt-FQZV-hjs/view",
+                    "upload_status": "DRIVE_COMPLETED",
+                    "verification_status": True,
+                    "link_accessibility_status": "ACCESSIBLE",
+                },
+                {
+                    "file_type": "pdf",
+                    "original_filename": "CSJMA24001390105_Backlog_R_R_Maheshwar.pdf",
+                    "expected_filename": "CSJMA24001390105_Backlog_R_R_Maheshwar.pdf",
+                    "mime_type": "application/pdf",
+                    "file_size": 651865,
+                    "source_drive_url": "https://drive.google.com/file/d/1KeglcTFkUsfTNHPoeR1sjXXwX95pTAq7/view",
+                    "source_file_id": "1KeglcTFkUsfTNHPoeR1sjXXwX95pTAq7",
+                    "drive_file_id": "1pHTwwUgM46N18Qm_8NtOKLMg27zjI37B",
+                    "admin_drive_url": "https://drive.google.com/file/d/1pHTwwUgM46N18Qm_8NtOKLMg27zjI37B/view",
+                    "upload_status": "DRIVE_COMPLETED",
+                    "verification_status": True,
+                    "link_accessibility_status": "ACCESSIBLE",
+                }
+            ]
+
+            for cfg in file_configs:
+                sf = db_sync.query(SubmissionFile).filter(
+                    SubmissionFile.submission_id == target_sub.id,
+                    SubmissionFile.file_type == cfg["file_type"]
+                ).first()
+                if sf:
+                    sf.original_filename = cfg["original_filename"]
+                    sf.expected_filename = cfg["expected_filename"]
+                    sf.mime_type = cfg["mime_type"]
+                    sf.file_size = cfg["file_size"]
+                    sf.source_drive_url = cfg["source_drive_url"]
+                    sf.source_file_id = cfg["source_file_id"]
+                    sf.drive_file_id = cfg["drive_file_id"]
+                    sf.admin_drive_url = cfg["admin_drive_url"]
+                    sf.upload_status = cfg["upload_status"]
+                    sf.verification_status = cfg["verification_status"]
+                    sf.link_accessibility_status = cfg["link_accessibility_status"]
+                else:
+                    new_sf = SubmissionFile(
+                        submission_id=target_sub.id,
+                        file_type=cfg["file_type"],
+                        original_filename=cfg["original_filename"],
+                        expected_filename=cfg["expected_filename"],
+                        mime_type=cfg["mime_type"],
+                        file_size=cfg["file_size"],
+                        source_drive_url=cfg["source_drive_url"],
+                        source_file_id=cfg["source_file_id"],
+                        drive_file_id=cfg["drive_file_id"],
+                        admin_drive_url=cfg["admin_drive_url"],
+                        upload_status=cfg["upload_status"],
+                        verification_status=cfg["verification_status"],
+                        link_accessibility_status=cfg["link_accessibility_status"]
+                    )
+                    db_sync.add(new_sf)
+            db_sync.commit()
+            logger.info("Synchronized submission links for CSJMA24001390105.")
+    except Exception as e:
+        logger.warning(f"Note on syncing CSJMA24001390105: {e}")
+    finally:
+        db_sync.close()
+
     # 3. Ensure upload directories
     UploadService.get_upload_dir()
     logger.info("Temporary storage directories initialized.")
